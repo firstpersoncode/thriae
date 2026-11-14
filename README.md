@@ -20,6 +20,8 @@ Before using this multi-agent workflow, ensure the following are installed and a
 
 Install Hermes and Herdr per their official documentation, then run `./.hermes/Start-Agents.sh` from the project root.
 
+On first run, the launcher prompts for an LLM provider and API key, then saves them for future runs.
+
 ## Pre-populating Kanban
 
 For ongoing projects with existing `PLANS.md`/`PROGRESS.md`/`ROADMAP.md`, Lead seeds the Kanban board from that state on first run (see planner skill section 17.10). After seeding, Kanban is the live source of truth.

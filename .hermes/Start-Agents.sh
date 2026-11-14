@@ -91,7 +91,53 @@ ensure_profile() {
   fi
   hermes -p "$profile" config set terminal.backend local >/dev/null
   hermes -p "$profile" config set terminal.cwd "$PROJECT_ROOT" >/dev/null
+  # Bootstrap credentials from an existing profile that has them, if this profile lacks any key.
+  PROFILE_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
+  if ! grep -qE '^(OPENCODE_GO_API_KEY|OPENCODE_ZEN_API_KEY)=.+' "$PROFILE_HOME/.env" 2>/dev/null; then
+    for src in "${HERMES_HOME:-$HOME/.hermes}/profiles"/*/; do
+      if grep -qE '^(OPENCODE_GO_API_KEY|OPENCODE_ZEN_API_KEY)=.+' "$src/.env" 2>/dev/null; then
+        cp "$src/.env" "$PROFILE_HOME/.env"
+        break
+      fi
+    done
+  fi
 }
+
+CRED_MARKER="$PROJECT_ROOT/.hermes/.credentials_configured"
+if [[ ! -f "$CRED_MARKER" ]]; then
+  echo ""
+  echo "Select LLM provider:"
+  echo "  1) OpenCode Go (OPENCODE_GO_API_KEY)"
+  echo "  2) OpenCode Zen (OPENCODE_ZEN_API_KEY)"
+  echo "  3) Skip (configure manually later)"
+  read -r -p "Choice [1]: " PROVIDER_CHOICE
+  PROVIDER_CHOICE="${PROVIDER_CHOICE:-1}"
+  case "$PROVIDER_CHOICE" in
+    1) ENV_KEY="OPENCODE_GO_API_KEY"; ENV_URL="OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1" ;;
+    2) ENV_KEY="OPENCODE_ZEN_API_KEY"; ENV_URL="OPENCODE_ZEN_BASE_URL=https://opencode.ai/zen/v1" ;;
+    3) ENV_KEY=""; ENV_URL="" ;;
+    *) ENV_KEY="OPENCODE_GO_API_KEY"; ENV_URL="OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1" ;;
+  esac
+  if [[ -n "$ENV_KEY" ]]; then
+    read -r -s -p "Paste your API key: " API_KEY
+    echo ""
+    [[ -n "$API_KEY" ]] || { echo "No key provided; skipping."; ENV_KEY=""; }
+  fi
+  if [[ -n "$ENV_KEY" ]]; then
+    printf '%s=%s\n%s\n' "$ENV_KEY" "$API_KEY" "$ENV_URL" > "$PROJECT_ROOT/.hermes/.env.tmp"
+    # Distribute to default and all thriae profiles
+    for target in "$HOME/.hermes" "$HOME/.hermes/profiles"/thriae_*; do
+      [[ -d "$target" ]] || continue
+      cp "$PROJECT_ROOT/.hermes/.env.tmp" "$target/.env"
+    done
+    rm -f "$PROJECT_ROOT/.hermes/.env.tmp"
+    echo "$PROVIDER_CHOICE" > "$CRED_MARKER"
+    log "Credentials saved for future runs"
+  else
+    echo "skipped" > "$CRED_MARKER"
+    log "Skipped credential setup"
+  fi
+fi
 
 log "Preparing three isolated Hermes profiles"
 ensure_profile thriae_lead "Project Lead, one-milestone planning and autonomous coordination"
@@ -245,11 +291,11 @@ wait_for_hermes() {
 # Derive a per-project Kanban board slug from the project directory name.
 BOARD_SLUG="$(printf '%s' "$(basename "$PROJECT_ROOT")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
 [[ -n "$BOARD_SLUG" ]] || BOARD_SLUG="project"
+export HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes"
+export HERMES_KANBAN_BOARD="$BOARD_SLUG"
 log "Ensuring Kanban board: $BOARD_SLUG"
 hermes kanban boards create "$BOARD_SLUG" --name "$(basename "$PROJECT_ROOT")" >/dev/null 2>&1 || true
 hermes kanban boards set-default-workdir "$BOARD_SLUG" "$PROJECT_ROOT" >/dev/null 2>&1 || true
-export HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes"
-export HERMES_KANBAN_BOARD="$BOARD_SLUG"
 
 if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
@@ -384,9 +430,9 @@ PROMPT
 }
 
 # Initialize workers first so Lead can verify their readiness before assigning work.
-start_agent engineer engineer "$ENGINEER_PANE" executor engineer
-start_agent reviewer reviewer "$REVIEWER_PANE" reviewer reviewer
-start_agent lead lead "$LEAD_PANE" planner lead
+start_agent engineer thriae_engineer "$ENGINEER_PANE" executor engineer
+start_agent reviewer thriae_reviewer "$REVIEWER_PANE" reviewer reviewer
+start_agent lead thriae_lead "$LEAD_PANE" planner lead
 
 log "All three Project agents are started and initialized"
 herdr workspace focus "$WORKSPACE_ID" >/dev/null 2>&1 || true

@@ -4,8 +4,8 @@
   "description": "",
   "icon": "",
   "color": "",
-  "default_workdir": "/Users/nassermaronie/Projects/thriae",
+  "default_workdir": null,
   "project_id": null,
-  "created_at": 1794665080,
+  "created_at": 1794668218,
   "archived": false
 }
