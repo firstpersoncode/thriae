@@ -994,7 +994,25 @@ The expected live agent names are:
 - `engineer`, running the `executor` skill and loading `delivery` only after review approval.
 - `reviewer`, running the `reviewer` skill.
 
-### 17.1 Initialization
+#### 17.0 Kanban Environment Pre-Flight (mandatory)
+
+Before any `kanban_*` tool call or `hermes kanban` CLI command, verify the agent runtime environment:
+
+- `HERMES_KANBAN_HOME` must equal `<PROJECT_ROOT>/.hermes`.
+- `HERMES_KANBAN_BOARD` must equal the project board slug.
+
+If either is unset or mispointed, do NOT create, modify, or seed Kanban tasks (they would silently land in `~/.hermes` or another project's board). Escalate as an environment blocker. Prefer launching agents through `Start-Agents.sh`, which exports both variables. For manual launches, export them explicitly before starting Hermes:
+
+```bash
+export HERMES_KANBAN_HOME="$(git rev-parse --show-toplevel)/.hermes"
+export HERMES_KANBAN_BOARD="$(basename "$(git rev-parse --show-toplevel)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
+```
+
+When the variables cannot be corrected, use `HERMES_KANBAN_DB=<PROJECT_ROOT>/.hermes/kanban/boards/<slug>/kanban.db` for inspection only; do not create tasks.
+
+**Do not manually edit agent profile `.env` files** to set `HERMES_KANBAN_HOME`, `HERMES_KANBAN_BOARD`, or any other environment variable. Profile `.env` files are overwritten in full by `Start-Agents.sh`'s credential distribution step, so hand edits silently disappear and can drift between profiles. Persist environment variables through `Start-Agents.sh` (which writes them idempotently) so there is one owner and one source of truth. If a value must change outside a launcher run, escalate to the user rather than editing the profile by hand.
+
+## 17.1 Initialization
 
 At each Lead session start:
 
@@ -1075,6 +1093,8 @@ Reviewer inspects the exact candidate range and returns a structured report to L
 
 Engineer implements valid corrections and reports the new candidate commit. Reviewer rechecks. Repeat until no required findings remain open. Do not mark a review approved while Critical/High/required findings remain unresolved.
 
+Triage judgment: a Low or Informational finding that is cosmetic and does not affect any documented exit criterion (e.g. a stale timestamp on a non-claimed row, a missing regression test) may be accepted as a risk instead of forcing a correction + re-review cycle. When accepting: record the finding ID and rationale as a Kanban comment on the phase task, mark status ACCEPTED_RISK, and note it in the milestone completion evidence. Medium or higher findings, and any finding that touches a documented exit criterion or data integrity in the success path, must be corrected and independently re-verified before approval. Never accept a finding silently; the acceptance must be visible in Kanban and review report.
+
 ### 17.8 PR Authorization
 
 After Reviewer explicitly approves the exact candidate commit:
@@ -1123,6 +1143,8 @@ Procedure:
 7. Reconcile discrepancies between tracked state and repository evidence before assigning new work.
 
 After seeding, the Kanban board becomes the authoritative live orchestration state. Do not duplicate state in markdown files.
+
+**Kanban dependency direction pitfall.** The Kanban parent→child link means the *child cannot complete until the parent is done*. This is a work-ordering prerequisite, not an aggregation. Do not model an aggregate (e.g., a milestone) as the parent of its phases: the aggregate can never be marked done while any child phase is still open, and the children cannot be marked done until the aggregate is done — a deadlock. Instead, keep aggregates out of the dependency graph (track them as comments/labels on the phase tasks) or make the aggregate depend on its phases (phases as parents of the aggregate), never the reverse. When in doubt, leave tasks flat with no parent links.
 
 ## 18. Herdr Communication Protocol
 

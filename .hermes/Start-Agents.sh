@@ -144,6 +144,19 @@ ensure_profile thriae_lead "Project Lead, one-milestone planning and autonomous 
 ensure_profile thriae_engineer "Project Engineer, implementation, validation, progress tracking, commits and PR creation"
 ensure_profile thriae_reviewer "Project independent Reviewer, documentation and engineering quality assessment"
 
+# Persist the project Kanban board location into each profile's .env so
+# gateway-spawned sessions (which do not inherit this launcher's exports)
+# also resolve the project-local board instead of ~/.hermes.
+persist_kanban_env() {
+  local home="$1"
+  local env_file="$home/.env" tmp
+  [[ -d "$home" ]] || return 0
+  touch "$env_file"
+  tmp="$(mktemp)"
+  grep -vE '^(HERMES_KANBAN_HOME|HERMES_KANBAN_BOARD)=' "$env_file" > "$tmp" 2>/dev/null || true
+  printf '\n# Kanban board (project-local; managed by Start-Agents.sh)\nHERMES_KANBAN_HOME=%s\nHERMES_KANBAN_BOARD=%s\n' "$PROJECT_ROOT/.hermes" "$BOARD_SLUG" >> "$tmp"
+  mv "$tmp" "$env_file"
+}
 log "Enabling Kanban toolset for all profiles"
 for profile in thriae_lead thriae_engineer thriae_reviewer; do
   hermes -p "$profile" tools enable kanban --platform cli >/dev/null 2>&1 || true
@@ -208,6 +221,7 @@ WORKSPACE_ID=""
 LEAD_PANE=""
 ENGINEER_PANE=""
 REVIEWER_PANE=""
+KANBAN_PANE=""
 LEAD_INITIALIZED=false
 ENGINEER_INITIALIZED=false
 REVIEWER_INITIALIZED=false
@@ -218,6 +232,7 @@ if [[ -s "$RUNTIME_FILE" ]]; then
   LEAD_PANE="$(jq -r '.lead_pane_id // empty' "$RUNTIME_FILE")"
   ENGINEER_PANE="$(jq -r '.engineer_pane_id // empty' "$RUNTIME_FILE")"
   REVIEWER_PANE="$(jq -r '.reviewer_pane_id // empty' "$RUNTIME_FILE")"
+  KANBAN_PANE="$(jq -r '.kanban_pane_id // empty' "$RUNTIME_FILE")"
   LEAD_INITIALIZED="$(jq -r '.lead_initialized // false' "$RUNTIME_FILE")"
   ENGINEER_INITIALIZED="$(jq -r '.engineer_initialized // false' "$RUNTIME_FILE")"
   REVIEWER_INITIALIZED="$(jq -r '.reviewer_initialized // false' "$RUNTIME_FILE")"
@@ -241,6 +256,10 @@ if [[ -s "$RUNTIME_FILE" ]]; then
     REVIEWER_PANE=""
     REVIEWER_INITIALIZED=false
   fi
+  if [[ -n "$KANBAN_PANE" ]] && ! herdr pane get "$KANBAN_PANE" >/dev/null 2>&1; then
+    log "Saved Kanban pane is unavailable; recreating it"
+    KANBAN_PANE=""
+  fi
 else
   for agent in lead engineer reviewer; do
     if herdr agent get "$agent" >/dev/null 2>&1; then
@@ -256,10 +275,11 @@ save_runtime() {
     --arg lead_pane_id "$LEAD_PANE" \
     --arg engineer_pane_id "$ENGINEER_PANE" \
     --arg reviewer_pane_id "$REVIEWER_PANE" \
+    --arg kanban_pane_id "$KANBAN_PANE" \
     --argjson lead_initialized "$LEAD_INITIALIZED" \
     --argjson engineer_initialized "$ENGINEER_INITIALIZED" \
     --argjson reviewer_initialized "$REVIEWER_INITIALIZED" \
-    '{workspace_id:$workspace_id,lead_pane_id:$lead_pane_id,engineer_pane_id:$engineer_pane_id,reviewer_pane_id:$reviewer_pane_id,lead_initialized:$lead_initialized,engineer_initialized:$engineer_initialized,reviewer_initialized:$reviewer_initialized}' \
+    '{workspace_id:$workspace_id,lead_pane_id:$lead_pane_id,engineer_pane_id:$engineer_pane_id,reviewer_pane_id:$reviewer_pane_id,kanban_pane_id:$kanban_pane_id,lead_initialized:$lead_initialized,engineer_initialized:$engineer_initialized,reviewer_initialized:$reviewer_initialized}' \
     > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$RUNTIME_FILE"
@@ -293,9 +313,38 @@ BOARD_SLUG="$(printf '%s' "$(basename "$PROJECT_ROOT")" | tr '[:upper:]' '[:lowe
 [[ -n "$BOARD_SLUG" ]] || BOARD_SLUG="project"
 export HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes"
 export HERMES_KANBAN_BOARD="$BOARD_SLUG"
+# Guard against cross-project board misplacement: the home must be project-local.
+[[ "$HERMES_KANBAN_HOME" == "$PROJECT_ROOT/.hermes" ]] || { echo "ERROR: HERMES_KANBAN_HOME is not project-local" >&2; exit 1; }
+log "Kanban home: $HERMES_KANBAN_HOME (board: $BOARD_SLUG)"
 log "Ensuring Kanban board: $BOARD_SLUG"
 hermes kanban boards create "$BOARD_SLUG" --name "$(basename "$PROJECT_ROOT")" >/dev/null 2>&1 || true
 hermes kanban boards set-default-workdir "$BOARD_SLUG" "$PROJECT_ROOT" >/dev/null 2>&1 || true
+hermes kanban boards switch "$BOARD_SLUG" >/dev/null 2>&1 || true
+
+# Keep the Kanban pane command in a script file so herdr does not split the
+# multi-command shell string into separate arguments.
+KANBAN_PANE_SCRIPT="$PROJECT_ROOT/.hermes/kanban-pane.sh"
+cat > "$KANBAN_PANE_SCRIPT" <<'KANBAN_PANE_EOF'
+#!/usr/bin/env bash
+set -u
+
+: "${HERMES_KANBAN_HOME:?HERMES_KANBAN_HOME is required}"
+: "${HERMES_KANBAN_BOARD:?HERMES_KANBAN_BOARD is required}"
+
+hermes kanban boards create "$HERMES_KANBAN_BOARD" >/dev/null 2>&1 || true
+hermes kanban boards switch "$HERMES_KANBAN_BOARD" >/dev/null 2>&1 || true
+
+hermes kanban stats
+hermes kanban list
+exec hermes kanban watch
+KANBAN_PANE_EOF
+chmod +x "$KANBAN_PANE_SCRIPT"
+
+persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}"
+for profile in thriae_lead thriae_engineer thriae_reviewer; do
+  persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
+done
+log "Kanban board persisted to profile envs: $BOARD_SLUG ($PROJECT_ROOT/.hermes)"
 
 if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
@@ -323,6 +372,16 @@ if [[ -z "$REVIEWER_PANE" ]]; then
   [[ -n "$REVIEWER_PANE" ]] || die "Could not split Reviewer pane: $REV_SPLIT_OUTPUT"
   sleep 1
   herdr pane run "$REVIEWER_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p thriae_reviewer chat --cli
+  save_runtime
+fi
+
+if [[ -z "$KANBAN_PANE" ]]; then
+  log "Splitting a Kanban pane from the Lead pane"
+  KANBAN_SPLIT_OUTPUT="$(herdr pane split --pane "$ENGINEER_PANE" --direction down --cwd "$PROJECT_ROOT" --no-focus)"
+  KANBAN_PANE="$(printf '%s\n' "$KANBAN_SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
+  [[ -n "$KANBAN_PANE" ]] || die "Could not split Kanban pane: $KANBAN_SPLIT_OUTPUT"
+  sleep 1
+  herdr pane run "$KANBAN_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" bash "$PROJECT_ROOT/.hermes/kanban-pane.sh"
   save_runtime
 fi
 
