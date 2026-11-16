@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-command launcher for Project's persistent Lead, Engineer, and Reviewer agents.
+# One-command launcher for Project's persistent Lead agent and additional agents.
 # Run from the repository root: ./start-project-agents.sh
 # Always attaches to the visible Herdr TUI after preparing the agents.
 
@@ -58,12 +58,7 @@ fi
 # Fail early rather than start agents with an incomplete project configuration.
 REQUIRED_FILES=(
   "$PROJECT_ROOT/.hermes.md"
-  "$PROJECT_ROOT/.hermes/skills/planner/SKILL.md"
-  "$PROJECT_ROOT/.hermes/skills/executor/SKILL.md"
-  "$PROJECT_ROOT/.hermes/skills/reviewer/SKILL.md"
-  "$PROJECT_ROOT/.hermes/skills/delivery/SKILL.md"
   "$PROJECT_ROOT/.hermes/memories/PLANS.md"
-  "$PROJECT_ROOT/.hermes/memories/PROGRESS.md"
 )
 for file in "${REQUIRED_FILES[@]}"; do
   [[ -s "$file" ]] || die "Required file is missing or empty: ${file#$PROJECT_ROOT/}"
@@ -101,6 +96,8 @@ ensure_profile() {
       fi
     done
   fi
+  # Profile metadata lives in .hermes/profiles/$profile/ (skills.txt, initial_prompt.txt).
+
 }
 
 CRED_MARKER="$PROJECT_ROOT/.hermes/.credentials_configured"
@@ -125,12 +122,8 @@ if [[ ! -f "$CRED_MARKER" ]]; then
   fi
   if [[ -n "$ENV_KEY" ]]; then
     printf '%s=%s\n%s\n' "$ENV_KEY" "$API_KEY" "$ENV_URL" > "$PROJECT_ROOT/.hermes/.env.tmp"
-    # Distribute to default and all thriae profiles
-    for target in "$HOME/.hermes" "$HOME/.hermes/profiles"/thriae_*; do
-      [[ -d "$target" ]] || continue
-      cp "$PROJECT_ROOT/.hermes/.env.tmp" "$target/.env"
-    done
-    rm -f "$PROJECT_ROOT/.hermes/.env.tmp"
+    # Seed the default Hermes home only; project profiles are seeded after creation.
+    cp "$PROJECT_ROOT/.hermes/.env.tmp" "$HOME/.hermes/.env"
     echo "$PROVIDER_CHOICE" > "$CRED_MARKER"
     log "Credentials saved for future runs"
   else
@@ -139,10 +132,52 @@ if [[ ! -f "$CRED_MARKER" ]]; then
   fi
 fi
 
-log "Preparing three isolated Hermes profiles"
-ensure_profile thriae_lead "Project Lead, one-milestone planning and autonomous coordination"
-ensure_profile thriae_engineer "Project Engineer, implementation, validation, progress tracking, commits and PR creation"
-ensure_profile thriae_reviewer "Project independent Reviewer, documentation and engineering quality assessment"
+log "Preparing Hermes profiles from .hermes/profiles/"
+shopt -s nullglob
+profile_dirs=("$PROJECT_ROOT/.hermes/profiles"/*/)
+shopt -u nullglob
+if [[ ${#profile_dirs[@]} -eq 0 ]]; then
+  die "No profile directories found in $PROJECT_ROOT/.hermes/profiles/. Create at least one <profile>/ with skills.txt and initial_prompt.txt."
+fi
+for dir in "${profile_dirs[@]}"; do
+  [[ -d "$dir" ]] || continue
+  profile="$(basename "$dir")"
+  [[ -s "$dir/skills.txt" ]] || die "Missing or empty skills.txt for profile $profile"
+  [[ -s "$dir/initial_prompt.txt" ]] || die "Missing or empty initial_prompt.txt for profile $profile"
+  description="Project agent profile $profile"
+  ensure_profile "$profile" "$description"
+done
+
+# Hardcoded Lead agent (orchestrator) - profile created here, loaded last.
+ensure_profile "thriae_lead" "Project Lead, one-milestone planning and autonomous coordination"
+
+# Seed credentials into project profiles only (never other profiles).
+if [[ -f "$PROJECT_ROOT/.hermes/.env.tmp" ]]; then
+  shopt -s nullglob
+  for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
+    [[ -d "$dir" ]] || continue
+    profile="$(basename "$dir")"
+    cp "$PROJECT_ROOT/.hermes/.env.tmp" "${HERMES_HOME:-$HOME/.hermes}/profiles/$profile/.env"
+  done
+  shopt -u nullglob
+  # Seed Lead profile credentials too.
+  cp "$PROJECT_ROOT/.hermes/.env.tmp" "${HERMES_HOME:-$HOME/.hermes}/profiles/thriae_lead/.env" 2>/dev/null || true
+  rm -f "$PROJECT_ROOT/.hermes/.env.tmp"
+fi
+
+# Collect profile names (source of truth) for subsequent steps.
+PROFILE_NAMES=()
+shopt -s nullglob
+for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
+  [[ -d "$dir" ]] || continue
+  PROFILE_NAMES+=("$(basename "$dir")")
+done
+shopt -u nullglob
+
+[[ ${#PROFILE_NAMES[@]} -gt 0 ]] || die "No profile directories found in $PROJECT_ROOT/.hermes/profiles/. Create at least one <profile>/ before running."
+
+# Hardcoded Lead agent is loaded last.
+PROFILE_NAMES+=("thriae_lead")
 
 # Persist the project Kanban board location into each profile's .env so
 # gateway-spawned sessions (which do not inherit this launcher's exports)
@@ -158,13 +193,13 @@ persist_kanban_env() {
   mv "$tmp" "$env_file"
 }
 log "Enabling Kanban toolset for all profiles"
-for profile in thriae_lead thriae_engineer thriae_reviewer; do
+for profile in "${PROFILE_NAMES[@]}"; do
   hermes -p "$profile" tools enable kanban --platform cli >/dev/null 2>&1 || true
 done
 
 log "Trusting the repository-local skills"
 hermes skills trust "$PROJECT_ROOT"
-for profile in thriae_lead thriae_engineer thriae_reviewer; do
+for profile in "${PROFILE_NAMES[@]}"; do
   HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile" hermes skills trust "$PROJECT_ROOT" >/dev/null 2>&1 || true
 done
 
@@ -200,7 +235,7 @@ fi
 # The Hermes integration is profile-scoped. Install it into each named profile,
 # not only the default ~/.hermes home.
 HERMES_BASE="${HERMES_HOME:-$HOME/.hermes}"
-for profile in thriae_lead thriae_engineer thriae_reviewer; do
+for profile in "${PROFILE_NAMES[@]}"; do
   PROFILE_HOME="$HERMES_BASE/profiles/$profile"
   [[ -d "$PROFILE_HOME" ]] || die "Hermes profile home not found: $PROFILE_HOME"
   PLUGIN_DIR="$PROFILE_HOME/plugins/herdr-agent-state"
@@ -218,72 +253,80 @@ for profile in thriae_lead thriae_engineer thriae_reviewer; do
 done
 
 WORKSPACE_ID=""
-LEAD_PANE=""
-ENGINEER_PANE=""
-REVIEWER_PANE=""
 KANBAN_PANE=""
-LEAD_INITIALIZED=false
-ENGINEER_INITIALIZED=false
-REVIEWER_INITIALIZED=false
+PROFILE_NAMES=()
+PROFILE_PANES=()
+PROFILE_INIT=()
+
+# Collect profiles from .hermes/profiles/*.txt (source of truth).
+shopt -s nullglob
+for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
+  [[ -d "$dir" ]] || continue
+  PROFILE_NAMES+=("$(basename "$dir")")
+done
+shopt -u nullglob
+
+if [[ ${#PROFILE_NAMES[@]} -eq 0 ]]; then
+  die "No profile directories found in $PROJECT_ROOT/.hermes/profiles/."
+fi
+
+# Hardcoded Lead agent is loaded last.
+PROFILE_NAMES+=("thriae_lead")
 
 if [[ -s "$RUNTIME_FILE" ]]; then
   jq -e 'type == "object"' "$RUNTIME_FILE" >/dev/null || die "Invalid runtime state JSON: $RUNTIME_FILE"
   WORKSPACE_ID="$(jq -r '.workspace_id // empty' "$RUNTIME_FILE")"
-  LEAD_PANE="$(jq -r '.lead_pane_id // empty' "$RUNTIME_FILE")"
-  ENGINEER_PANE="$(jq -r '.engineer_pane_id // empty' "$RUNTIME_FILE")"
-  REVIEWER_PANE="$(jq -r '.reviewer_pane_id // empty' "$RUNTIME_FILE")"
   KANBAN_PANE="$(jq -r '.kanban_pane_id // empty' "$RUNTIME_FILE")"
-  LEAD_INITIALIZED="$(jq -r '.lead_initialized // false' "$RUNTIME_FILE")"
-  ENGINEER_INITIALIZED="$(jq -r '.engineer_initialized // false' "$RUNTIME_FILE")"
-  REVIEWER_INITIALIZED="$(jq -r '.reviewer_initialized // false' "$RUNTIME_FILE")"
-  if [[ -n "$WORKSPACE_ID" && -n "$LEAD_PANE" ]] && ! herdr pane get "$LEAD_PANE" >/dev/null 2>&1; then
-    log "Saved Herdr workspace/pane is unavailable; recreating agents"
-    WORKSPACE_ID=""
-    LEAD_PANE=""
-    ENGINEER_PANE=""
-    REVIEWER_PANE=""
-    LEAD_INITIALIZED=false
-    ENGINEER_INITIALIZED=false
-    REVIEWER_INITIALIZED=false
+  for p in "${PROFILE_NAMES[@]}"; do
+    pid="$(jq -r --arg p "$p" '.profiles[$p] // empty' "$RUNTIME_FILE")"
+    init="$(jq -r --arg p "$p" '.initialized[$p] // false' "$RUNTIME_FILE")"
+    PROFILE_PANES+=("$pid")
+    PROFILE_INIT+=("$init")
+  done
+  need_recreate=false
+  if [[ -n "$WORKSPACE_ID" ]]; then
+    # validate at least first pane if present
+    :
   fi
-  if [[ -n "$ENGINEER_PANE" ]] && ! herdr pane get "$ENGINEER_PANE" >/dev/null 2>&1; then
-    log "Saved Engineer pane is unavailable; recreating it"
-    ENGINEER_PANE=""
-    ENGINEER_INITIALIZED=false
-  fi
-  if [[ -n "$REVIEWER_PANE" ]] && ! herdr pane get "$REVIEWER_PANE" >/dev/null 2>&1; then
-    log "Saved Reviewer pane is unavailable; recreating it"
-    REVIEWER_PANE=""
-    REVIEWER_INITIALIZED=false
-  fi
-  if [[ -n "$KANBAN_PANE" ]] && ! herdr pane get "$KANBAN_PANE" >/dev/null 2>&1; then
-    log "Saved Kanban pane is unavailable; recreating it"
-    KANBAN_PANE=""
-  fi
-else
-  for agent in lead engineer reviewer; do
-    if herdr agent get "$agent" >/dev/null 2>&1; then
-      die "Agent '$agent' is already live but the runtime record is missing. Refusing to create duplicate agents. Inspect 'herdr agent list' and recover the runtime record first."
+  for pid in "${PROFILE_PANES[@]}"; do
+    if [[ -z "$pid" ]] || ! herdr pane get "$pid" >/dev/null 2>&1; then
+      need_recreate=true
     fi
   done
+  if [[ -n "$KANBAN_PANE" ]] && ! herdr pane get "$KANBAN_PANE" >/dev/null 2>&1; then
+    need_recreate=true
+  fi
+  if $need_recreate; then
+    log "Saved pane state is unavailable; recreating agents"
+    WORKSPACE_ID=""
+    KANBAN_PANE=""
+    PROFILE_PANES=()
+    PROFILE_INIT=()
+  fi
+else
+  : # no runtime record; will create
 fi
 
 save_runtime() {
   local tmp="$RUNTIME_FILE.tmp"
+  local profiles_json="{" initialized_json="{"
+  for i in "${!PROFILE_NAMES[@]}"; do
+    profiles_json+="\"${PROFILE_NAMES[$i]}\":\"${PROFILE_PANES[$i]}\","
+    initialized_json+="\"${PROFILE_NAMES[$i]}\":${PROFILE_INIT[$i]},"
+  done
+  profiles_json="${profiles_json%,}}"
+  initialized_json="${initialized_json%,}}"
   jq -n \
     --arg workspace_id "$WORKSPACE_ID" \
-    --arg lead_pane_id "$LEAD_PANE" \
-    --arg engineer_pane_id "$ENGINEER_PANE" \
-    --arg reviewer_pane_id "$REVIEWER_PANE" \
     --arg kanban_pane_id "$KANBAN_PANE" \
-    --argjson lead_initialized "$LEAD_INITIALIZED" \
-    --argjson engineer_initialized "$ENGINEER_INITIALIZED" \
-    --argjson reviewer_initialized "$REVIEWER_INITIALIZED" \
-    '{workspace_id:$workspace_id,lead_pane_id:$lead_pane_id,engineer_pane_id:$engineer_pane_id,reviewer_pane_id:$reviewer_pane_id,kanban_pane_id:$kanban_pane_id,lead_initialized:$lead_initialized,engineer_initialized:$engineer_initialized,reviewer_initialized:$reviewer_initialized}' \
+    --argjson profiles "$profiles_json" \
+    --argjson initialized "$initialized_json" \
+    '{workspace_id:$workspace_id,kanban_pane_id:$kanban_pane_id,profiles:$profiles,initialized:$initialized}' \
     > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$RUNTIME_FILE"
 }
+
 
 wait_for_shell() {
   local pane="$1" name
@@ -341,7 +384,7 @@ KANBAN_PANE_EOF
 chmod +x "$KANBAN_PANE_SCRIPT"
 
 persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}"
-for profile in thriae_lead thriae_engineer thriae_reviewer; do
+for profile in "${PROFILE_NAMES[@]}"; do
   persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
 done
 log "Kanban board persisted to profile envs: $BOARD_SLUG ($PROJECT_ROOT/.hermes)"
@@ -350,172 +393,136 @@ if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
   CREATED="$(herdr workspace create --cwd "$PROJECT_ROOT" --label "Project Agents" --no-focus)"
   WORKSPACE_ID="$(printf '%s\n' "$CREATED" | jq -r '.result.workspace.workspace_id // empty')"
-  LEAD_PANE="$(printf '%s\n' "$CREATED" | jq -r '.result.root_pane.pane_id // empty')"
-  [[ -n "$WORKSPACE_ID" && -n "$LEAD_PANE" ]] || die "Could not parse Herdr workspace response: $CREATED"
-  save_runtime
-fi
+  ROOT_PANE="$(printf '%s\n' "$CREATED" | jq -r '.result.root_pane.pane_id // empty')"
+  [[ -n "$WORKSPACE_ID" && -n "$ROOT_PANE" ]] || die "Could not parse Herdr workspace response: $CREATED"
 
-if [[ -z "$ENGINEER_PANE" ]]; then
-  log "Splitting an Engineer pane from the Lead pane"
-  ENG_SPLIT_OUTPUT="$(herdr pane split --pane "$LEAD_PANE" --direction right --cwd "$PROJECT_ROOT" --no-focus)"
-  ENGINEER_PANE="$(printf '%s\n' "$ENG_SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
-  [[ -n "$ENGINEER_PANE" ]] || die "Could not split Engineer pane: $ENG_SPLIT_OUTPUT"
-  sleep 1
-  herdr pane run "$ENGINEER_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p thriae_engineer chat --cli
-  save_runtime
-fi
+  PROFILE_PANES=()
+  PROFILE_INIT=()
+  for i in "${!PROFILE_NAMES[@]}"; do
+    if [[ $i -eq 0 ]]; then
+      PROFILE_PANES+=("$ROOT_PANE")
+    else
+      SPLIT_OUTPUT="$(herdr pane split --pane "${PROFILE_PANES[$((i-1))]}" --direction right --cwd "$PROJECT_ROOT" --no-focus)"
+      NEW_PANE="$(printf '%s\n' "$SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
+      [[ -n "$NEW_PANE" ]] || die "Could not split pane for ${PROFILE_NAMES[$i]}: $SPLIT_OUTPUT"
+      sleep 0.5
+      PROFILE_PANES+=("$NEW_PANE")
+    fi
+    PROFILE_INIT+=("false")
+  done
 
-if [[ -z "$REVIEWER_PANE" ]]; then
-  log "Splitting a Reviewer pane from the Engineer pane"
-  REV_SPLIT_OUTPUT="$(herdr pane split --pane "$LEAD_PANE" --direction down --cwd "$PROJECT_ROOT" --no-focus)"
-  REVIEWER_PANE="$(printf '%s\n' "$REV_SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
-  [[ -n "$REVIEWER_PANE" ]] || die "Could not split Reviewer pane: $REV_SPLIT_OUTPUT"
-  sleep 1
-  herdr pane run "$REVIEWER_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p thriae_reviewer chat --cli
-  save_runtime
-fi
-
-if [[ -z "$KANBAN_PANE" ]]; then
-  log "Splitting a Kanban pane from the Lead pane"
-  KANBAN_SPLIT_OUTPUT="$(herdr pane split --pane "$ENGINEER_PANE" --direction down --cwd "$PROJECT_ROOT" --no-focus)"
+  KANBAN_SPLIT_OUTPUT="$(herdr pane split --pane "${PROFILE_PANES[${#PROFILE_PANES[@]}-1]}" --direction down --cwd "$PROJECT_ROOT" --no-focus)"
   KANBAN_PANE="$(printf '%s\n' "$KANBAN_SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
   [[ -n "$KANBAN_PANE" ]] || die "Could not split Kanban pane: $KANBAN_SPLIT_OUTPUT"
+  sleep 1
+
+  for i in "${!PROFILE_NAMES[@]}"; do
+    herdr pane run "${PROFILE_PANES[$i]}" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "${PROFILE_NAMES[$i]}" chat --cli
+  done
   sleep 1
   herdr pane run "$KANBAN_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" bash "$PROJECT_ROOT/.hermes/kanban-pane.sh"
   save_runtime
 fi
 
-
-for pane in "$LEAD_PANE" "$ENGINEER_PANE" "$REVIEWER_PANE"; do
+for pane in "${PROFILE_PANES[@]}" "$KANBAN_PANE"; do
   herdr pane get "$pane" >/dev/null 2>&1 || die "Saved pane '$pane' is unavailable. Inspect the Herdr workspace before changing runtime state."
   wait_for_shell "$pane"
 done
 
+
 start_agent() {
-  local name="$1" profile="$2" pane="$3" skill="$4" flag="$5" prompt_text initialized was_running=true
+  local idx="$1"
+  local profile="${PROFILE_NAMES[$idx]}"
+  local pane="${PROFILE_PANES[$idx]}"
+  local skills_list prompt_text initialized was_running=true
 
-  if herdr pane process-info --pane "$pane" 2>/dev/null | grep -q 'hermes.*chat'; then
-    log "$name is already running in $pane; reusing its current session"
-  else
-    was_running=false
-    log "Starting $name using profile $profile in $pane"
-    herdr pane run "$pane" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "$profile" chat --cli
-    wait_for_hermes "$pane"
-  fi
-
-  case "$flag" in
-    lead) initialized="$LEAD_INITIALIZED" ;;
-    engineer) initialized="$ENGINEER_INITIALIZED" ;;
-    reviewer) initialized="$REVIEWER_INITIALIZED" ;;
-    *) die "Unknown internal initialization flag: $flag" ;;
-  esac
-  if [[ "$initialized" == "true" && "$was_running" == "true" ]]; then return 0; fi
-
-  case "$name" in
-    engineer)
-      prompt_text=$(cat <<'PROMPT'
-Initialize as the Project Engineer.
-
-1. Load the complete project-local `executor` skill using `skill_view("executor")`.
-2. Read the root `.hermes.md` instructions.
-3. Read `.hermes/memories/PLANS.md` and `PROGRESS.md`.
-4. Inspect relevant documentation under `.hermes/project/`.
-5. Confirm that you own application implementation and `PROGRESS.md`, but not `PLANS.md`.
-6. Do not begin implementation until Lead assigns or confirms the next approved task through Herdr.
-7. Report readiness and wait for Lead.
-PROMPT
-)
-      ;;
-    reviewer)
-      prompt_text=$(cat <<'PROMPT'
-Initialize as the independent Project Reviewer.
-
-1. Load the complete project-local `reviewer` skill using `skill_view("reviewer")`.
-2. Read the root `.hermes.md` instructions.
-3. Read relevant project context: `.hermes/project/`, `.hermes/memories/PLANS.md`, and `PROGRESS.md`.
-4. Remain strictly read only. Never modify repository files or fix findings.
-5. Do not review until Lead provides the exact review base commit, candidate commit, phase scope, and review round.
-6. Report readiness and wait for Lead.
-PROMPT
-)
-      ;;
-    lead)
-      prompt_text=$(cat <<'PROMPT'
-BEGIN THE AUTONOMOUS MULTI-AGENT WORKFLOW.
+  if [[ "$profile" == "thriae_lead" ]]; then
+    skills_list="planner"
+    prompt_text="BEGIN THE AUTONOMOUS MULTI-AGENT WORKFLOW.
 
 You are the Project Lead and workflow orchestrator.
 
-1. Load the complete project-local `planner` skill using `skill_view("planner")`.
-2. Read the root `.hermes.md` instructions.
-3. Read `.hermes/memories/PLANS.md` and `PROGRESS.md`.
-4. Verify that Engineer and Reviewer are running and have completed initialization. Use Herdr status and output inspection. Do not assign work to an agent that is still initializing or blocked.
-5. Recursively inspect relevant documentation under `.hermes/project/`, including the canonical roadmap.
+1. Load the complete project-local planner skill using skill_view(\"planner\").
+2. Read the root .hermes.md instructions.
+3. Read .hermes/memories/PLANS.md.
+4. Verify that all other agents are running and have completed initialization.
+5. Recursively inspect relevant documentation under .hermes/project/, including the canonical roadmap.
 
 INITIAL STATE RECONCILIATION IS REQUIRED.
 
-
 Do not begin Phase 3 until reconciliation is complete and all required prerequisites are satisfied.
 
-After reconciliation, autonomously coordinate Engineer through Herdr. Preserve an active milestone plan. If PLANS.md is empty, plan exactly one next eligible milestone from the verified roadmap and relevant documentation. Never plan the entire roadmap.
+After reconciliation, autonomously coordinate agents through Herdr. Preserve an active milestone plan. If PLANS.md is empty, plan exactly one next eligible milestone from the verified roadmap and relevant documentation. Never plan the entire roadmap.
 
-During implementation, continuously compare completed committed subitems against .hermes/project/, PLANS.md, and PROGRESS.md. Do not modify Engineer-owned files. Send focused feedback and pause affected work when a material scope, requirement, or architecture decision needs authorization.
+During implementation, continuously compare completed committed subitems against .hermes/project/ and PLANS.md. Do not modify implementation-agent-owned files. Send focused feedback and pause affected work when a material scope, requirement, or architecture decision needs authorization.
 
-At phase completion, freeze the exact candidate commit range, stop implementation assignments, and coordinate independent Reviewer assessment. Triage findings, assign valid corrections to Engineer, and repeat review until Reviewer approves the exact candidate.
+At phase completion, freeze the exact candidate commit range, stop implementation assignments, and coordinate independent review assessment. Triage findings, assign valid corrections to the implementation agent, and repeat review until the review agent approves the exact candidate.
 
-Only after actual independent approval may you authorize Engineer to load `delivery` and create the PR against master. Do not create or merge PRs yourself.
+Only after actual independent approval may you authorize the implementation agent to create the PR against master. Do not create or merge PRs yourself.
 
 Do not archive or clear the active milestone plan until required PRs are merged or otherwise explicitly integrated, dependencies are satisfied, and milestone exit criteria are verified.
 
 Use Herdr for agent communication. Do not rely on conversational memory. Escalate genuine owner decisions or blockers instead of inventing answers.
 
-Begin reconciliation now and continue autonomously within these boundaries.
-PROMPT
-)
-      ;;
-  esac
+Begin reconciliation now and continue autonomously within these boundaries."
+  else
+    local profile_dir="$PROJECT_ROOT/.hermes/profiles/$profile"
+    local skills_file="$profile_dir/skills.txt"
+    local prompt_file="$profile_dir/initial_prompt.txt"
+    skills_list="$(grep -v '^[[:space:]]*$' "$skills_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+    [[ -s "$skills_file" ]] || die "Missing skills.txt for profile $profile"
+    [[ -s "$prompt_file" ]] || die "Missing initial_prompt.txt for profile $profile"
+    prompt_text="$(cat "$prompt_file")"
+  fi
 
-  log "Initializing $name and loading its $skill skill"
-  # Herdr can only bind agents to the original workspace root pane, so submit
-  # initialization text directly to every pane.
+  if herdr pane process-info --pane "$pane" 2>/dev/null | grep -q 'hermes.*chat'; then
+    log "$profile is already running in $pane; reusing its current session"
+  else
+    was_running=false
+    log "Starting $profile using profile $profile in $pane"
+    herdr pane run "$pane" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "$profile" chat --cli
+    wait_for_hermes "$pane"
+  fi
+
+  initialized="${PROFILE_INIT[$idx]}"
+  if [[ "$initialized" == "true" && "$was_running" == "true" ]]; then return 0; fi
+
+  prompt_text="$(cat "$prompt_file")"
+
+  log "Initializing $profile"
   herdr pane send-text "$pane" "$prompt_text"
   herdr pane send-keys "$pane" Enter
 
-  case "$flag" in
-    lead) LEAD_INITIALIZED=true ;;
-    engineer) ENGINEER_INITIALIZED=true ;;
-    reviewer) REVIEWER_INITIALIZED=true ;;
-  esac
+  PROFILE_INIT[$idx]=true
   save_runtime
 }
 
-# Initialize workers first so Lead can verify their readiness before assigning work.
-start_agent engineer thriae_engineer "$ENGINEER_PANE" executor engineer
-start_agent reviewer thriae_reviewer "$REVIEWER_PANE" reviewer reviewer
-start_agent lead thriae_lead "$LEAD_PANE" planner lead
 
-log "All three Project agents are started and initialized"
+# Initialize workers first so Lead can verify their readiness before assigning work.
+for i in "${!PROFILE_NAMES[@]}"; do
+  start_agent "$i"
+done
+
+log "All Project agents are started and initialized"
 herdr workspace focus "$WORKSPACE_ID" >/dev/null 2>&1 || true
 
-cat <<SUMMARY
-
-Project autonomous workflow is active.
-
-Repository: $PROJECT_ROOT
-Workspace:  $WORKSPACE_ID
-Lead pane:  $LEAD_PANE
-Engineer:   $ENGINEER_PANE
-Reviewer:   $REVIEWER_PANE
-Runtime:    ${RUNTIME_FILE#$PROJECT_ROOT/}
-
-Lead has been instructed to reconcile existing project state before assigning implementation work.
-
-Useful commands:
-  herdr pane list --workspace "$WORKSPACE_ID"
-  herdr pane read "$LEAD_PANE" --source recent-unwrapped --lines 120
-  herdr pane read "$ENGINEER_PANE" --source recent-unwrapped --lines 120
-  herdr pane read "$REVIEWER_PANE" --source recent-unwrapped --lines 120
-
-SUMMARY
+echo ""
+echo "Project autonomous workflow is active."
+echo ""
+echo "Repository: $PROJECT_ROOT"
+echo "Workspace:  $WORKSPACE_ID"
+for i in "${!PROFILE_NAMES[@]}"; do
+  echo "Profile ${PROFILE_NAMES[$i]}: pane ${PROFILE_PANES[$i]}"
+done
+echo "Kanban pane: $KANBAN_PANE"
+echo "Runtime:    ${RUNTIME_FILE#$PROJECT_ROOT/}"
+echo ""
+echo "Useful commands:"
+echo "  herdr pane list --workspace $WORKSPACE_ID"
+for i in "${!PROFILE_NAMES[@]}"; do
+  echo "  herdr pane read ${PROFILE_PANES[$i]} --source recent-unwrapped --lines 120"
+done
+echo ""
 
 log "Opening the visible Herdr TUI now. Press Ctrl+B then Q to detach; agents continue running."
 exec herdr
