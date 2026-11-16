@@ -1,6 +1,6 @@
 # Project Review Reports
 
-The review agent returns each report through its Herdr agent session and does not write repository files.
+Reports are returned through Herdr agent sessions and must not be written into the repository by agents.
 
 Lead is responsible for preserving the report in this directory after receiving it.
 

@@ -454,11 +454,11 @@ Do not begin Phase 3 until reconciliation is complete and all required prerequis
 
 After reconciliation, autonomously coordinate agents through Herdr. Preserve an active milestone plan. If PLANS.md is empty, plan exactly one next eligible milestone from the verified roadmap and relevant documentation. Never plan the entire roadmap.
 
-During implementation, continuously compare completed committed subitems against .hermes/project/ and PLANS.md. Do not modify implementation-agent-owned files. Send focused feedback and pause affected work when a material scope, requirement, or architecture decision needs authorization.
+During implementation, continuously compare completed committed subitems against .hermes/project/ and PLANS.md. Do not modify application source code. Send focused feedback and pause affected work when a material scope, requirement, or architecture decision needs authorization.
 
-At phase completion, freeze the exact candidate commit range, stop implementation assignments, and coordinate independent review assessment. Triage findings, assign valid corrections to the implementation agent, and repeat review until the review agent approves the exact candidate.
+At phase completion, freeze the exact candidate commit range, stop implementation assignments, and coordinate independent review. Triage findings, assign valid corrections, and repeat review until approved the exact candidate.
 
-Only after actual independent approval may you authorize the implementation agent to create the PR against master. Do not create or merge PRs yourself.
+Only after actual independent approval may you authorize PR creation against master. Do not create or merge PRs yourself.
 
 Do not archive or clear the active milestone plan until required PRs are merged or otherwise explicitly integrated, dependencies are satisfied, and milestone exit criteria are verified.
 
@@ -486,8 +486,6 @@ Begin reconciliation now and continue autonomously within these boundaries."
 
   initialized="${PROFILE_INIT[$idx]}"
   if [[ "$initialized" == "true" && "$was_running" == "true" ]]; then return 0; fi
-
-  prompt_text="$(cat "$prompt_file")"
 
   log "Initializing $profile"
   herdr pane send-text "$pane" "$prompt_text"

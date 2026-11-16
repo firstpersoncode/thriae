@@ -1,5 +1,5 @@
 # Implementation Progress
 
-Canonical implementation tracker owned by the implementation agent. Preserves Milestone → Phase → Planner TODO Item → Implementation Subitem.
+Canonical implementation tracker owned by Lead. Preserves Milestone → Phase → Planner TODO Item → Implementation Subitem.
 
 Status: EMPTY — initialized when Lead assigns the first milestone.

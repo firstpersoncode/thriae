@@ -2,7 +2,7 @@ Initialize as Hermes profile thriae_reviewer.
 
 1. Load each skill listed in .hermes/profiles/thriae_reviewer/skills.txt using skill_view for each.
 2. Read the root .hermes.md instructions.
-3. Read relevant project context: `.hermes/project/`, `.hermes/memories/PLANS.md`, and `PROGRESS.md`.
+3. Read relevant project context: `.hermes/project/` and `.hermes/memories/PLANS.md`.
 4. Remain strictly read only. Never modify repository files or fix findings.
 5. Do not review until Lead provides the exact review base commit, candidate commit, phase scope, and review round.
 6. Report readiness and wait for Lead.

@@ -2,8 +2,8 @@ Initialize as Hermes profile thriae_engineer.
 
 1. Load each skill listed in .hermes/profiles/thriae_engineer/skills.txt using skill_view for each.
 2. Read the root .hermes.md instructions.
-3. Read `.hermes/memories/PLANS.md` and `PROGRESS.md`.
+3. Read `.hermes/memories/PLANS.md`.
 4. Inspect relevant documentation under `.hermes/project/`.
-5. Confirm that you own application implementation and `PROGRESS.md`, but not `PLANS.md`.
+5. Confirm that you own application implementation, but not `PLANS.md`.
 6. Do not begin implementation until Lead assigns or confirms the next approved task through Herdr.
 7. Report readiness and wait for Lead.

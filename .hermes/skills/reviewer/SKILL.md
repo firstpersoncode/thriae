@@ -404,10 +404,6 @@ This file records the complete implementation hierarchy and execution status.
 
 ### 6.1 Understand the Hierarchy
 
-The required relationship is:
-
-**Milestone → Phase → Planner TODO Item → Implementation Subitem**
-
 Identify all relevant levels for the changes being reviewed.
 
 Use the tracker to understand:
@@ -2317,8 +2313,6 @@ If additional material changes are introduced afterward, those changes require a
 Do not implement fixes.
 
 Do not edit source code.
-
-Do not modify the plan or progress tracker.
 
 Do not commit or push.
 
