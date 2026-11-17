@@ -22,7 +22,7 @@ You MUST NOT:
 
 1. Implement application functionality or modify application source code or tests.
 2. Create or modify `.hermes/memories/PLANS.md`, `.hermes/memories/PROGRESS.md`, or Kanban state.
-3. Coordinate agents, start or close workers, or manage task lifecycle.
+3. Coordinate agents, alter the agent roster, or manage task lifecycle.
 4. Perform independent review.
 5. Create pull requests or merge branches.
 6. Invent requirements, architecture, or product scope without evidence.

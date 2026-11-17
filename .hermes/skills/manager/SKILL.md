@@ -122,21 +122,25 @@ Never claim that implementation, validation, review, PR creation, or merge has h
 
 You coordinate any declared agent through the project Kanban board (SQLite, selected via `HERMES_KANBAN_BOARD`) and Herdr. The Kanban board is the authoritative live task state; `.hermes/runtime/herdr-agents.json` tracks only ephemeral pane and live-agent identity, while `PLANS.md`/`PROGRESS.md` hold approved scope and execution detail.
 
-### Dynamic Profile and Skill Discovery
+### Static Agent Topology
+
+All agents are pre-started by `Start-Agents.sh`; dynamic spawning is disabled (`kanban.dispatch_in_gateway: false`, set by the launcher). If an agent is missing, verify with `herdr agent list`, record a `WAITING_OWNER` blocker, and escalate to the owner — never spawn, restart, or substitute an agent, and never create a default profile or add a skill to fill a gap.
+
+### Profile and Skill Discovery
 
 At each Lead initialization, before selecting a new agent after declarations change, and whenever no current capability matches:
 
 1. Enumerate the actual immediate non-Lead profile directories under `<PROJECT_ROOT>/.hermes/profiles/`. Exclude the reserved `thriae_lead` declaration directory from worker selection. Every valid worker directory is eligible; none is preferred or excluded by any other name.
-2. Require non-empty `skills.txt` and `initial_prompt.txt` in each candidate directory. Treat an invalid declaration explicitly: do not spawn it, silently skip it, substitute another profile, or invent missing files.
+2. Require non-empty `skills.txt` and `initial_prompt.txt` in each candidate directory. Treat an invalid declaration explicitly: do not select it, silently skip it, substitute another profile, or invent missing files.
 3. Read the candidate's initial prompt and exact skill list. Read the relevant declared skill definitions as data when needed to understand actual behavior, permissions, limits, outputs, and handoffs. Do not adopt those worker skills as Lead's own procedure.
 4. Build a capability inventory from those declarations, including write permissions, read-only boundaries, allowed external operations, artifact ownership, required inputs, and reporting contract. A skill or profile name alone is not capability evidence.
 5. Match each approved task's needs to a compatible current profile. Any profile is eligible for any function its declarations support, including functions not anticipated by this planner skill.
 6. If several profiles match, choose using task compatibility, independence requirements, current workload, and artifact boundaries—not naming conventions.
 7. If none match, record a capability blocker containing the required behavior and inspected declarations. Ask the owner for a suitable declaration or a scope decision. Never create a default profile, rewrite a worker prompt, add a skill, or force an incompatible agent to fill the gap.
 
-Use actual discovered profile names for Kanban `assignee` values and Hermes `-p` arguments. Keep profile names and fixed assignments out of `PLANS.md`. New valid profiles and skills become available through discovery without changes to this planner skill.
+Use actual discovered profile names for Kanban `assignee` values and Hermes `-p` arguments. Keep profile names and fixed assignments out of `PLANS.md`. New valid profiles and skills become available through discovery without changes to this planner skill, but a new profile only becomes an agent after the owner reruns `Start-Agents.sh` — discovery selects among declared profiles, it does not create agents.
 
-Workers need no knowledge of peer profiles, peer skills, live topology, or Herdr lifecycle. Give each worker its complete assignment and required artifacts. Workers report results or dependencies to Lead through Kanban; Lead alone performs discovery, inter-agent routing, spawning, and closure. Do not inject peer-specific names or peer-coordination duties into a worker's assignment.
+Workers need no knowledge of peer profiles, peer skills, live topology, or Herdr lifecycle. Give each worker its complete assignment and required artifacts. Workers report results or dependencies to Lead through Kanban; Lead alone performs discovery, inter-agent routing, and closure. Do not inject peer-specific names or peer-coordination duties into a worker's assignment.
 
 #### 17.0 Kanban Environment Pre-Flight (mandatory)
 
@@ -145,9 +149,7 @@ Before any `kanban_*` tool call or `hermes kanban` CLI command, verify the agent
 - `HERMES_KANBAN_HOME` must equal `<PROJECT_ROOT>/.hermes`.
 - `HERMES_KANBAN_BOARD` must equal the project board slug.
 
-If either is unset or mispointed, do NOT create, modify, or seed Kanban tasks (they would silently land in `~/.hermes` or another project's board). Escalate as an environment blocker. Prefer launching agents through `Start-Agents.sh`, which exports both variables. For manual launches, export them explicitly before starting Hermes:
-
-Use the launcher's persisted Kanban environment. Relaunch via `Start-Agents.sh` or export the variables before dispatching workers.
+If either is unset or mispointed, do NOT create, modify, or seed Kanban tasks (they would land on another project's board) — escalate as an environment blocker. Relaunch via `Start-Agents.sh` or export both variables yourself first.
 
 ```bash
 export HERMES_KANBAN_HOME="$(git rev-parse --show-toplevel)/.hermes"
@@ -156,7 +158,7 @@ export HERMES_KANBAN_BOARD="$(basename "$(git rev-parse --show-toplevel)" | tr '
 
 When the variables cannot be corrected, use `HERMES_KANBAN_DB=<PROJECT_ROOT>/.hermes/kanban/boards/<slug>/kanban.db` for inspection only; do not create tasks.
 
-**Do not manually edit agent profile `.env` files** to set `HERMES_KANBAN_HOME`, `HERMES_KANBAN_BOARD`, or any other environment variable. Profile `.env` files are overwritten in full by `Start-Agents.sh`'s credential distribution step, so hand edits silently disappear and can drift between profiles. Persist environment variables through `Start-Agents.sh` (which writes them idempotently) so there is one owner and one source of truth. If a value must change outside a launcher run, escalate to the user rather than editing the profile by hand.
+Do not manually edit agent profile `.env` files to set runtime variables — escalate instead. Credentials are Hermes-managed (profiles inherit the default home's keys at creation); the launcher never writes them.
 
 
 ## 17.1 Initialization
@@ -179,7 +181,7 @@ If `PLANS.md` contains an active milestone, preserve it and continue that milest
 ### Reconciliation pitfalls
 
 - A worker completion report is evidence to verify, not proof: inspect the reported commit, changed files, validation output, and current HEAD before treating the task as complete.
-- A worker startup or prompt timeout does not prove the worker failed to start; the dispatcher may have claimed and spawned it. Check `kanban_show`/`kanban_list` and the agent pane before retrying or declaring a startup failure.
+- A worker startup or prompt timeout does not prove the worker failed; check Kanban state and the agent pane before retrying. If the agent is genuinely not running, record a `WAITING_OWNER` blocker and escalate (spawning is disabled).
 - Plan and progress checkboxes can claim implementation that HEAD lacks. Run the documented import or entrypoint checks; if the module is missing, create a restoration task instead of treating the work as complete.
 - A review report cited in `PROGRESS.md` but absent on disk is a reconciliation gap, not approval evidence. Re-obtain or explicitly record the missing report before citing the review.
 
@@ -308,7 +310,7 @@ After seeding, the Kanban board becomes the authoritative live orchestration sta
 
 ## 18. Herdr Communication Protocol
 
-**Herdr environment pre-flight.** `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` are set by Herdr at pane creation and can be stale after a pane is recreated or a session is resumed. Before dispatching an agent, verify the Lead's actual pane with `herdr pane list` and export corrected values matching the focused pane; a stale `HERDR_PANE_ID` makes `pane split` fail with `pane_not_found`. Coordinate workers through Kanban and Herdr CLI commands rather than profile-specific tool plugins. Workers cannot spawn or close their own agents and must escalate to Lead.
+**Herdr environment pre-flight.** `HERDR_PANE_ID`/`HERDR_TAB_ID`/`HERDR_WORKSPACE_ID` can go stale after a pane is recreated or a session resumed; verify with `herdr pane list` before coordinating. The Lead never creates, splits, or closes panes — agents are pre-started by `Start-Agents.sh`.
 
 Use Herdr agent commands to coordinate live agents.
 

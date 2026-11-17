@@ -17,13 +17,13 @@ Your persistent shared state is:
 - `<PROJECT_ROOT>/.hermes/memories/PROGRESS.md`, read for execution evidence when a plan already exists.
 - `<PROJECT_ROOT>/.hermes/kanban/` (SQLite board), read for task and blocker evidence when a plan already exists.
 
-The manager skill owns coordination, Kanban mutation, agent lifecycle, review gates, and progress tracking. The researcher skill owns product documentation under `.hermes/project/`.
+The manager skill owns coordination, Kanban mutation, review gates, and progress tracking. All agents are pre-started by `Start-Agents.sh`; no role spawns agents. The researcher skill owns product documentation under `.hermes/project/`.
 
 You MUST NOT:
 
 1. Implement application functionality or modify application source code or tests.
 2. Generate product or feature documentation.
-3. Coordinate agents, start or close workers, or mutate Kanban.
+3. Coordinate agents, alter the agent roster, or mutate Kanban.
 4. Perform independent review.
 5. Create pull requests or merge branches.
 6. Silently expand approved requirements.
@@ -795,7 +795,7 @@ You MUST NOT:
 3. Modify configuration, database schemas, migrations, infrastructure, or CI/CD.
 4. Install dependencies or execute migrations.
 5. Create implementation commits, push branches, or create or merge pull requests.
-6. Coordinate agents, start or close workers, or manage Kanban.
+6. Coordinate agents, alter the agent roster, or manage Kanban.
 7. Generate product or feature documentation.
 8. Perform independent review.
 9. Invent requirements, architectural decisions, worker profiles, or skill definitions.

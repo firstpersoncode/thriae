@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-command launcher for Project's persistent Lead agent and additional agents.
-# Run from the repository root: ./start-project-agents.sh
-# Always attaches to the visible Herdr TUI after preparing the agents.
+# One-command launcher for Project's Lead agent and additional agents.
+# Run from the repository root. Starts all declared agents in Herdr panes when
+# a Herdr server is running; otherwise just prepares profiles and opens the TUI.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Support being located either in the repository root or in .hermes/.
@@ -30,10 +30,10 @@ case "${1:-}" in
   *) echo "Usage: $0" >&2; exit 2 ;;
 esac
 
-# This launcher is intentionally interactive. Never silently leave the agents
-# running without attaching the visible Herdr terminal UI.
+# This launcher is intentionally interactive and always ends by opening the
+# visible Herdr TUI; it does not support headless mode.
 if [[ ! -t 0 || ! -t 1 ]]; then
-  echo "ERROR: Run this script from an interactive terminal. The launcher always opens the visible Herdr TUI; it does not support headless mode." >&2
+  echo "ERROR: Run this script from an interactive terminal. The launcher opens the visible Herdr TUI; it does not support headless mode." >&2
   exit 2
 fi
 
@@ -47,23 +47,14 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 
 for cmd in git hermes herdr; do require_cmd "$cmd"; done
-if ! command -v jq >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    log "jq is required for Herdr's JSON responses; installing it with Homebrew"
-    brew install jq
-  else
-    die "jq is required. Install it with 'brew install jq', then rerun this script."
-  fi
-fi
 
-# Fail early rather than start agents with an incomplete project configuration.
-REQUIRED_FILES=(
-  "$PROJECT_ROOT/.hermes.md"
-  "$PROJECT_ROOT/.hermes/memories/PLANS.md"
-)
-for file in "${REQUIRED_FILES[@]}"; do
-  [[ -s "$file" ]] || die "Required file is missing or empty: ${file#$PROJECT_ROOT/}"
-done
+# Fail early if the root project instructions are missing. PLANS.md is only a
+# warning: the Lead's own initialization plans the first milestone when it is
+# absent or empty, so a first run must not be blocked by it.
+[[ -s "$PROJECT_ROOT/.hermes.md" ]] || die "Required file is missing or empty: .hermes.md"
+if [[ ! -s "$PROJECT_ROOT/.hermes/memories/PLANS.md" ]]; then
+  log "NOTE: .hermes/memories/PLANS.md is missing or empty - the Lead will plan the first milestone during initialization"
+fi
 
 # Keep the local Herdr IDs and flags out of implementation commits.
 if git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -87,11 +78,9 @@ read_project_setting() {
 
 ensure_profile() {
   local profile="$1" description="$2" declaration_dir="$3"
-  local provider model base_url credential_file profile_home actual
+  local provider model base_url profile_home actual
   provider="$(read_project_setting "$declaration_dir/provider" "provider for $profile")" || return 1
   model="$(read_project_setting "$declaration_dir/model" "model for $profile")" || return 1
-  credential_file="$declaration_dir/.env"
-  [[ -f "$credential_file" ]] || die "Missing credentials file for $profile: ${credential_file#$PROJECT_ROOT/} (create it, or leave it empty for a keyless provider)"
 
   if hermes profile show "$profile" >/dev/null 2>&1; then
     log "Using existing Hermes profile: $profile"
@@ -100,13 +89,12 @@ ensure_profile() {
     hermes profile create "$profile" --no-skills --description "$description"
   fi
   profile_home="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
-  chmod 600 "$credential_file"
-  credential_tmp="$(mktemp "$profile_home/.env.XXXXXX")"
-  # Project .env files are credentials-only; never let stale runtime identifiers override launcher env.
-  grep -vE '^(HERDR_|HERMES_WORKSPACE_ID=|HERMES_KANBAN_)' "$credential_file" > "$credential_tmp" || true
-  chmod 600 "$credential_tmp"
-  install -m 600 "$credential_tmp" "$profile_home/.env"
-  rm -f "$credential_tmp"
+  # Launcher never touches credentials; profile creation copies the Hermes
+  # home's keys. Warn only if the profile still ends up credential-less.
+  if [[ ! -s "$profile_home/.env" ]]; then
+    log "WARNING: $profile has no credentials yet ($profile_home/.env is missing or empty)"
+    log "         Add API keys manually before starting agents, e.g.: hermes -p $profile setup"
+  fi
   hermes -p "$profile" config set terminal.backend local >/dev/null
   hermes -p "$profile" config set terminal.cwd "$PROJECT_ROOT" >/dev/null
   hermes -p "$profile" config set model.provider "$provider" >/dev/null
@@ -170,57 +158,43 @@ shopt -u nullglob
 # Hardcoded Lead agent is loaded last.
 PROFILE_NAMES+=("thriae_lead")
 
-# Persist the project Kanban board location into each profile's .env so
-# gateway-spawned sessions (which do not inherit this launcher's exports)
-# also resolve the project-local board instead of ~/.hermes.
-persist_kanban_env() {
-  local home="$1"
-  local env_file="$home/.env" tmp
-  [[ -d "$home" ]] || return 0
-  touch "$env_file"
-  tmp="$(mktemp)"
-  grep -vE '^(HERMES_KANBAN_HOME|HERMES_KANBAN_BOARD|HERDR_|HERMES_WORKSPACE_ID)=' "$env_file" > "$tmp" 2>/dev/null || true
-  printf '\n# Kanban board (project-local; managed by Start-Agents.sh)\nHERMES_KANBAN_HOME=%s\nHERMES_KANBAN_BOARD=%s\n' "$PROJECT_ROOT/.hermes" "$BOARD_SLUG" >> "$tmp"
-  mv "$tmp" "$env_file"
-}
 log "Enabling Kanban toolset for all profiles"
 for profile in "${PROFILE_NAMES[@]}"; do
   hermes -p "$profile" tools enable kanban --platform cli >/dev/null 2>&1 || true
+  # Static topology: all agents pre-started here; dispatcher spawning disabled.
+  hermes -p "$profile" config set kanban.dispatch_in_gateway false >/dev/null 2>&1 || true
 done
 
-log "Trusting the repository-local skills"
-hermes skills trust "$PROJECT_ROOT"
+# Trust repository-local skills per profile only (never the global trust store).
 for profile in "${PROFILE_NAMES[@]}"; do
   HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile" hermes skills trust "$PROJECT_ROOT" >/dev/null 2>&1 || true
 done
 
-# Herdr uses a background session server internally; the visible TUI is attached at the end.
-if herdr status server >/dev/null 2>&1; then
-  log "Herdr server is already running"
+# Herdr manages its own daemon lifecycle (`herdr` to start/attach, `herdr
+# server stop` to fully stop); panes are wired only when a server is running.
+# Detect from output text: `herdr status server` exits 0 even when down.
+herdr_status="$(herdr status server 2>/dev/null || true)"
+if [[ -n "$herdr_status" ]] && ! grep -qi 'not running' <<<"$herdr_status"; then
+  HERDR_SERVER_RUNNING=1
+  log "Herdr server is running; agent panes will be wired up"
 else
-  log "Starting Herdr background session service (Herdr TUI will attach visibly after agent setup)"
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    LOG_ROOT="$HOME/Library/Logs"
-  else
-    LOG_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/herdr"
-  fi
-  mkdir -p "$LOG_ROOT"
-  SERVER_LOG="$LOG_ROOT/project-herdr-server.log"
-  nohup herdr server >"$SERVER_LOG" 2>&1 < /dev/null &
-  SERVER_PID=$!
-  printf '%s\n' "$SERVER_PID" > "$RUNTIME_DIR/herdr-server.pid"
+  HERDR_SERVER_RUNNING=0
+  log "Herdr server is not running; skipping pane wiring (the TUI below manages its own session)"
+  echo ""
+  echo "Panes and agents were NOT wired up because no Herdr server is running."
+  echo "To enable automatic wiring: run 'herdr' to start a session, keep it running,"
+  echo "then rerun ./.hermes/Start-Agents.sh"
+  echo ""
+fi
 
-  READY=0
-  for _ in $(seq 1 45); do
-    if herdr status server >/dev/null 2>&1; then READY=1; break; fi
-    if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then break; fi
-    sleep 1
-  done
-  [[ "$READY" -eq 1 ]] || {
-    echo "Herdr server failed to start. Log: $SERVER_LOG" >&2
-    tail -n 80 "$SERVER_LOG" >&2 || true
-    exit 1
-  }
+# jq is required only for the wiring path (Herdr's JSON responses).
+if [[ $HERDR_SERVER_RUNNING -eq 1 ]] && ! command -v jq >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    log "jq is required for Herdr's JSON responses; installing it with Homebrew"
+    brew install jq
+  else
+    die "jq is required. Install it with 'brew install jq', then rerun this script."
+  fi
 fi
 
 # The Hermes integration is profile-scoped. Install it into each named profile,
@@ -250,6 +224,9 @@ PROFILE_INIT=()
 
 # All declared profiles are started by the launcher; Lead is loaded last.
 # Do not reset PROFILE_NAMES here: the list built above is the source of truth.
+
+# Pane wiring needs the Herdr socket API (a running server).
+if [[ $HERDR_SERVER_RUNNING -eq 1 ]]; then
 
 if [[ -s "$RUNTIME_FILE" ]]; then
   jq -e 'type == "object"' "$RUNTIME_FILE" >/dev/null || die "Invalid runtime state JSON: $RUNTIME_FILE"
@@ -323,11 +300,13 @@ wait_for_hermes() {
   for _ in $(seq 1 20); do
     name="$(herdr pane process-info --pane "$pane" 2>/dev/null | jq -r '.result.process_info.foreground_processes[0].name // empty')"
     case "$name" in
-      ""|zsh|bash|sh|fish) sleep 0.5 ;;
+      ""|zsh|bash|sh|fish)    sleep 0.5 ;;
       *) return 0 ;;
     esac
   done
 }
+
+fi # end HERDR_SERVER_RUNNING pane-wiring block
 
 # Derive a per-project Kanban board slug from the project directory name.
 BOARD_SLUG="$(printf '%s' "$(basename "$PROJECT_ROOT")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
@@ -361,16 +340,15 @@ exec hermes kanban watch
 KANBAN_PANE_EOF
 chmod +x "$KANBAN_PANE_SCRIPT"
 
-persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}"
-for profile in "${PROFILE_NAMES[@]}"; do
-  persist_kanban_env "${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
-done
-log "Kanban board persisted to profile envs: $BOARD_SLUG ($PROJECT_ROOT/.hermes)"
+# Kanban env is injected per agent process at launch, never persisted into profile .env files.
 
 # Lead coordinates through Kanban and Herdr CLI commands, not a profile-specific
 # plugin. Keep the terminal tool enabled so Lead can run `herdr` directly.
 hermes -p "$LEAD_PROFILE" tools enable terminal --platform cli >/dev/null
 log "Lead Herdr CLI coordination enabled (no orchestration plugin)"
+
+# Workspace/pane creation and agent startup need a running Herdr server.
+if [[ $HERDR_SERVER_RUNNING -eq 1 ]]; then
 
 if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
@@ -456,6 +434,9 @@ done
 log "All Project agents are started and initialized"
 herdr workspace focus "$WORKSPACE_ID" >/dev/null 2>&1 || true
 
+fi # end HERDR_SERVER_RUNNING workspace/agent block
+
+if [[ $HERDR_SERVER_RUNNING -eq 1 ]]; then
 echo ""
 echo "Project autonomous workflow is active."
 echo ""
@@ -473,6 +454,20 @@ for i in "${!PROFILE_NAMES[@]}"; do
   echo "  herdr pane read ${PROFILE_PANES[$i]} --source recent-unwrapped --lines 120"
 done
 echo ""
+else
+echo ""
+echo "Profile preparation complete; no agent panes were created (no Herdr server was running)."
+echo "Repository: $PROJECT_ROOT"
+echo "Profiles:   ${PROFILE_NAMES[*]}"
+echo ""
+echo "Next steps:"
+echo "  1. Run 'herdr' (or use the TUI opening now) to start a Herdr session."
+echo "  2. Rerun ./.hermes/Start-Agents.sh while the session is running to wire"
+echo "     up the agent panes and Kanban board automatically."
+echo ""
+echo "To fully stop Herdr and all agents later: herdr server stop"
+echo ""
+fi
 
-log "Opening the visible Herdr TUI now. Press Ctrl+B then Q to detach; agents continue running."
+log "Opening the visible Herdr TUI now. Press Ctrl+B then Q to detach; agents keep running while the Herdr session is up."
 exec herdr
