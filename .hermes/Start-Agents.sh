@@ -101,7 +101,12 @@ ensure_profile() {
   fi
   profile_home="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
   chmod 600 "$credential_file"
-  install -m 600 "$credential_file" "$profile_home/.env"
+  credential_tmp="$(mktemp "$profile_home/.env.XXXXXX")"
+  # Project .env files are credentials-only; never let stale runtime identifiers override launcher env.
+  grep -vE '^(HERDR_|HERMES_WORKSPACE_ID=|HERMES_KANBAN_)' "$credential_file" > "$credential_tmp" || true
+  chmod 600 "$credential_tmp"
+  install -m 600 "$credential_tmp" "$profile_home/.env"
+  rm -f "$credential_tmp"
   hermes -p "$profile" config set terminal.backend local >/dev/null
   hermes -p "$profile" config set terminal.cwd "$PROJECT_ROOT" >/dev/null
   hermes -p "$profile" config set model.provider "$provider" >/dev/null
@@ -174,7 +179,7 @@ persist_kanban_env() {
   [[ -d "$home" ]] || return 0
   touch "$env_file"
   tmp="$(mktemp)"
-  grep -vE '^(HERMES_KANBAN_HOME|HERMES_KANBAN_BOARD)=' "$env_file" > "$tmp" 2>/dev/null || true
+  grep -vE '^(HERMES_KANBAN_HOME|HERMES_KANBAN_BOARD|HERDR_|HERMES_WORKSPACE_ID)=' "$env_file" > "$tmp" 2>/dev/null || true
   printf '\n# Kanban board (project-local; managed by Start-Agents.sh)\nHERMES_KANBAN_HOME=%s\nHERMES_KANBAN_BOARD=%s\n' "$PROJECT_ROOT/.hermes" "$BOARD_SLUG" >> "$tmp"
   mv "$tmp" "$env_file"
 }
@@ -240,13 +245,11 @@ done
 
 WORKSPACE_ID=""
 KANBAN_PANE=""
-PROFILE_NAMES=()
 PROFILE_PANES=()
 PROFILE_INIT=()
 
-# Runtime agents are Lead-only. Worker profiles are prepared above but are
-# started on demand by Lead through the herdr_orchestrator plugin.
-PROFILE_NAMES=(thriae_lead)
+# All declared profiles are started by the launcher; Lead is loaded last.
+# Do not reset PROFILE_NAMES here: the list built above is the source of truth.
 
 if [[ -s "$RUNTIME_FILE" ]]; then
   jq -e 'type == "object"' "$RUNTIME_FILE" >/dev/null || die "Invalid runtime state JSON: $RUNTIME_FILE"
@@ -364,19 +367,10 @@ for profile in "${PROFILE_NAMES[@]}"; do
 done
 log "Kanban board persisted to profile envs: $BOARD_SLUG ($PROJECT_ROOT/.hermes)"
 
-# Install the Lead-only orchestration plugin. It owns all Herdr mutations and
-# exposes task-scoped tools instead of raw pane/process control.
-LEAD_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/thriae_lead"
-PLUGIN_SRC="$PROJECT_ROOT/.hermes/plugins/herdr_orchestrator"
-PLUGIN_DST="$LEAD_HOME/plugins/herdr_orchestrator"
-[[ -d "$PLUGIN_SRC" ]] || die "Missing Lead orchestration plugin: ${PLUGIN_SRC#$PROJECT_ROOT/}"
-mkdir -p "$LEAD_HOME/plugins"
-rm -rf "$PLUGIN_DST"
-cp -R "$PLUGIN_SRC" "$PLUGIN_DST"
-hermes -p thriae_lead plugins enable herdr_orchestrator >/dev/null
-hermes -p thriae_lead tools enable orchestrator --platform cli >/dev/null
-hermes -p thriae_lead tools disable terminal --platform cli >/dev/null
-log "Lead orchestration plugin enabled: herdr_orchestrator"
+# Lead coordinates through Kanban and Herdr CLI commands, not a profile-specific
+# plugin. Keep the terminal tool enabled so Lead can run `herdr` directly.
+hermes -p "$LEAD_PROFILE" tools enable terminal --platform cli >/dev/null
+log "Lead Herdr CLI coordination enabled (no orchestration plugin)"
 
 if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
@@ -406,7 +400,7 @@ if [[ -z "$WORKSPACE_ID" ]]; then
   sleep 1
 
   for i in "${!PROFILE_NAMES[@]}"; do
-    herdr pane run "${PROFILE_PANES[$i]}" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "${PROFILE_NAMES[$i]}" chat --cli
+    herdr pane run "${PROFILE_PANES[$i]}" env HERDR_PANE_ID="${PROFILE_PANES[$i]}" HERMES_WORKSPACE_ID="$WORKSPACE_ID" HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "${PROFILE_NAMES[$i]}" chat --cli
   done
   sleep 1
   herdr pane run "$KANBAN_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" bash "$PROJECT_ROOT/.hermes/kanban-pane.sh"

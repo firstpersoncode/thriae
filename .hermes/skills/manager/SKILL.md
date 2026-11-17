@@ -76,6 +76,8 @@ The Lead's writable project artifacts are limited to:
 
 Do not modify other project files.
 
+Manual execution boundary: Do not use `execute_code` or subprocess calls to inspect or modify repository state. Use file/search and Kanban tools, plus Herdr CLI commands for agent coordination.
+
 
 ## 16. Lead Status Reporting
 
@@ -145,6 +147,8 @@ Before any `kanban_*` tool call or `hermes kanban` CLI command, verify the agent
 
 If either is unset or mispointed, do NOT create, modify, or seed Kanban tasks (they would silently land in `~/.hermes` or another project's board). Escalate as an environment blocker. Prefer launching agents through `Start-Agents.sh`, which exports both variables. For manual launches, export them explicitly before starting Hermes:
 
+Use the launcher's persisted Kanban environment. Relaunch via `Start-Agents.sh` or export the variables before dispatching workers.
+
 ```bash
 export HERMES_KANBAN_HOME="$(git rev-parse --show-toplevel)/.hermes"
 export HERMES_KANBAN_BOARD="$(basename "$(git rev-parse --show-toplevel)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
@@ -166,10 +170,18 @@ At each Lead session start:
 5. Inspect `.hermes/memories/ROADMAP.md` when deciding whether a new milestone is required.
 6. Inspect Git branches, commits, working tree, and current PR state.
 7. Reconcile Kanban task state with plan/progress/repository evidence before assigning new work.
+8. Verify the declared implementation actually exists in HEAD before trusting plan or progress checkboxes; run the documented import or entrypoint checks (`python3 -c "import <package>"`, `python3 -m <package> --help`) and treat a missing module as a regression, not as completed work.
 
 If `PLANS.md` is absent or empty, plan one milestone only.
 
 If `PLANS.md` contains an active milestone, preserve it and continue that milestone.
+
+### Reconciliation pitfalls
+
+- A worker completion report is evidence to verify, not proof: inspect the reported commit, changed files, validation output, and current HEAD before treating the task as complete.
+- A worker startup or prompt timeout does not prove the worker failed to start; the dispatcher may have claimed and spawned it. Check `kanban_show`/`kanban_list` and the agent pane before retrying or declaring a startup failure.
+- Plan and progress checkboxes can claim implementation that HEAD lacks. Run the documented import or entrypoint checks; if the module is missing, create a restoration task instead of treating the work as complete.
+- A review report cited in `PROGRESS.md` but absent on disk is a reconciliation gap, not approval evidence. Re-obtain or explicitly record the missing report before citing the review.
 
 ### 17.2 One Active Milestone
 
@@ -229,12 +241,15 @@ The review agent inspects the exact candidate range and returns a structured rep
 
 1. Reads the complete review report.
 2. Preserves the report under `.hermes/memories/reviews/<milestone>/<phase>/`.
-3. Triages findings against documentation and implementation evidence.
-4. Records finding status as Kanban comments on the phase task.
-5. Sends valid corrections to the implementation agent (new/corrective tasks or reassignment).
-6. Escalates material architectural or requirement conflicts to the user.
+3. If the report was delivered only through Herdr or the task completed without a preserved report comment, create a follow-up task asking the reviewer to restate the complete report as a Kanban comment, then preserve that text under `.hermes/memories/reviews/<milestone>/<phase>/` before any approval claim.
+4. Triages findings against documentation and implementation evidence.
+5. Records finding status as Kanban comments on the phase task.
+6. Sends valid corrections to the implementation agent (new/corrective tasks or reassignment).
+7. Escalates material architectural or requirement conflicts to the user.
 
 The implementation agent implements valid corrections and reports the new candidate commit. The review agent rechecks. Repeat until no required findings remain open. Do not mark a review approved while Critical/High/required findings remain unresolved.
+
+Before recording `REVIEW_APPROVED` or citing a review as evidence, verify the preserved report exists at the cited path under `.hermes/memories/reviews/` and that its base and candidate commits match the frozen range. A path cited in `PROGRESS.md` but absent on disk is a reconciliation gap, not approval evidence; re-obtain or explicitly record the missing report before making any approval claim.
 
 Triage judgment: a Low or Informational finding that is cosmetic and does not affect any documented exit criterion (e.g. a stale timestamp on a non-claimed row, a missing regression test) may be accepted as a risk instead of forcing a correction + re-review cycle. When accepting: record the finding ID and rationale as a Kanban comment on the phase task, mark status ACCEPTED_RISK, and note it in the milestone completion evidence. Medium or higher findings, and any finding that touches a documented exit criterion or data integrity in the success path, must be corrected and independently re-verified before approval. Never accept a finding silently; the acceptance must be visible in Kanban and review report.
 
@@ -292,6 +307,8 @@ After seeding, the Kanban board becomes the authoritative live orchestration sta
 
 
 ## 18. Herdr Communication Protocol
+
+**Herdr environment pre-flight.** `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` are set by Herdr at pane creation and can be stale after a pane is recreated or a session is resumed. Before dispatching an agent, verify the Lead's actual pane with `herdr pane list` and export corrected values matching the focused pane; a stale `HERDR_PANE_ID` makes `pane split` fail with `pane_not_found`. Coordinate workers through Kanban and Herdr CLI commands rather than profile-specific tool plugins. Workers cannot spawn or close their own agents and must escalate to Lead.
 
 Use Herdr agent commands to coordinate live agents.
 

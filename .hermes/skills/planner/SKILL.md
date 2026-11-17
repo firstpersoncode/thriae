@@ -82,6 +82,8 @@ The project documentation is located under:
 
 Inspect every Markdown document directly in `<PROJECT_ROOT>/.hermes/project/`.
 
+Do not trust a memory note or plan reference that names a canonical roadmap path; verify the file exists under `.hermes/project/` before treating it as the roadmap. If it is absent, record the gap and plan from the verified product documentation.
+
 This directory documents one repository-level product. Do not group project documentation into product-specific subdirectories. If the product contains multiple internal projects or components, identify them in the documentation content rather than by directory.
 
 Include supporting documentation directly in that directory.

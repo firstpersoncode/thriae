@@ -1426,6 +1426,7 @@ Check:
 10. Validation records.
 11. Missing implementation entries.
 12. Tracker entries without implementation evidence.
+13. When implementation was restored, reconciled, or recreated from prior commits, whether tracker and plan commit references match the actual reviewed candidate hashes. Identical file content does not imply identical commit identity; stale references are a Low tracker finding, not a code defect.
 
 A checked subitem must have evidence of:
 
@@ -1546,6 +1547,8 @@ Distinguish:
 **Not Applicable:** Does not apply to the reviewed changes.
 
 Never claim a test passed without execution evidence.
+
+For documentation reviews, execute every documented example and compare exact stdout, stderr, and exit codes, including message wording and newline formatting.
 
 ---
 
