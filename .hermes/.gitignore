@@ -1,3 +1,5 @@
 .credentials_configured
 runtime/
-profiles/*/.env
+kanban/**
+memories/**
+project/**

@@ -218,7 +218,6 @@ for profile in "${PROFILE_NAMES[@]}"; do
 done
 
 WORKSPACE_ID=""
-KANBAN_PANE=""
 PROFILE_PANES=()
 PROFILE_INIT=()
 
@@ -231,7 +230,6 @@ if [[ $HERDR_SERVER_RUNNING -eq 1 ]]; then
 if [[ -s "$RUNTIME_FILE" ]]; then
   jq -e 'type == "object"' "$RUNTIME_FILE" >/dev/null || die "Invalid runtime state JSON: $RUNTIME_FILE"
   WORKSPACE_ID="$(jq -r '.workspace_id // empty' "$RUNTIME_FILE")"
-  KANBAN_PANE="$(jq -r '.kanban_pane_id // empty' "$RUNTIME_FILE")"
   for p in "${PROFILE_NAMES[@]}"; do
     pid="$(jq -r --arg p "$p" '.profiles[$p] // empty' "$RUNTIME_FILE")"
     init="$(jq -r --arg p "$p" '.initialized[$p] // false' "$RUNTIME_FILE")"
@@ -248,13 +246,9 @@ if [[ -s "$RUNTIME_FILE" ]]; then
       need_recreate=true
     fi
   done
-  if [[ -n "$KANBAN_PANE" ]] && ! herdr pane get "$KANBAN_PANE" >/dev/null 2>&1; then
-    need_recreate=true
-  fi
   if $need_recreate; then
     log "Saved pane state is unavailable; recreating agents"
     WORKSPACE_ID=""
-    KANBAN_PANE=""
     PROFILE_PANES=()
     PROFILE_INIT=()
   fi
@@ -273,10 +267,9 @@ save_runtime() {
   initialized_json="${initialized_json%,}}"
   jq -n \
     --arg workspace_id "$WORKSPACE_ID" \
-    --arg kanban_pane_id "$KANBAN_PANE" \
     --argjson profiles "$profiles_json" \
     --argjson initialized "$initialized_json" \
-    '{workspace_id:$workspace_id,kanban_pane_id:$kanban_pane_id,profiles:$profiles,initialized:$initialized}' \
+    '{workspace_id:$workspace_id,profiles:$profiles,initialized:$initialized}' \
     > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$RUNTIME_FILE"
@@ -321,25 +314,6 @@ hermes kanban boards create "$BOARD_SLUG" --name "$(basename "$PROJECT_ROOT")" >
 hermes kanban boards set-default-workdir "$BOARD_SLUG" "$PROJECT_ROOT" >/dev/null 2>&1 || true
 hermes kanban boards switch "$BOARD_SLUG" >/dev/null 2>&1 || true
 
-# Keep the Kanban pane command in a script file so herdr does not split the
-# multi-command shell string into separate arguments.
-KANBAN_PANE_SCRIPT="$PROJECT_ROOT/.hermes/kanban-pane.sh"
-cat > "$KANBAN_PANE_SCRIPT" <<'KANBAN_PANE_EOF'
-#!/usr/bin/env bash
-set -u
-
-: "${HERMES_KANBAN_HOME:?HERMES_KANBAN_HOME is required}"
-: "${HERMES_KANBAN_BOARD:?HERMES_KANBAN_BOARD is required}"
-
-hermes kanban boards create "$HERMES_KANBAN_BOARD" >/dev/null 2>&1 || true
-hermes kanban boards switch "$HERMES_KANBAN_BOARD" >/dev/null 2>&1 || true
-
-hermes kanban stats
-hermes kanban list
-exec hermes kanban watch
-KANBAN_PANE_EOF
-chmod +x "$KANBAN_PANE_SCRIPT"
-
 # Kanban env is injected per agent process at launch, never persisted into profile .env files.
 
 # Lead coordinates through Kanban and Herdr CLI commands, not a profile-specific
@@ -372,20 +346,13 @@ if [[ -z "$WORKSPACE_ID" ]]; then
     PROFILE_INIT+=("false")
   done
 
-  KANBAN_SPLIT_OUTPUT="$(herdr pane split --pane "${PROFILE_PANES[${#PROFILE_PANES[@]}-1]}" --direction down --cwd "$PROJECT_ROOT" --no-focus)"
-  KANBAN_PANE="$(printf '%s\n' "$KANBAN_SPLIT_OUTPUT" | jq -r '.result.pane.pane_id // empty')"
-  [[ -n "$KANBAN_PANE" ]] || die "Could not split Kanban pane: $KANBAN_SPLIT_OUTPUT"
-  sleep 1
-
   for i in "${!PROFILE_NAMES[@]}"; do
     herdr pane run "${PROFILE_PANES[$i]}" env HERDR_PANE_ID="${PROFILE_PANES[$i]}" HERMES_WORKSPACE_ID="$WORKSPACE_ID" HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes -p "${PROFILE_NAMES[$i]}" chat --cli
   done
-  sleep 1
-  herdr pane run "$KANBAN_PANE" env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" bash "$PROJECT_ROOT/.hermes/kanban-pane.sh"
   save_runtime
 fi
 
-for pane in "${PROFILE_PANES[@]}" "$KANBAN_PANE"; do
+for pane in "${PROFILE_PANES[@]}"; do
   herdr pane get "$pane" >/dev/null 2>&1 || die "Saved pane '$pane' is unavailable. Inspect the Herdr workspace before changing runtime state."
   wait_for_shell "$pane"
 done
@@ -445,7 +412,6 @@ echo "Workspace:  $WORKSPACE_ID"
 for i in "${!PROFILE_NAMES[@]}"; do
   echo "Profile ${PROFILE_NAMES[$i]}: pane ${PROFILE_PANES[$i]}"
 done
-echo "Kanban pane: $KANBAN_PANE"
 echo "Runtime:    ${RUNTIME_FILE#$PROJECT_ROOT/}"
 echo ""
 echo "Useful commands:"
@@ -454,6 +420,10 @@ for i in "${!PROFILE_NAMES[@]}"; do
   echo "  herdr pane read ${PROFILE_PANES[$i]} --source recent-unwrapped --lines 120"
 done
 echo ""
+echo "To fully stop Herdr and all agents later: herdr server stop"
+echo ""
+log "Opening the project-scoped dashboard (Kanban board: $BOARD_SLUG). Attach to the agent TUI anytime with: herdr"
+exec env HERMES_KANBAN_HOME="$PROJECT_ROOT/.hermes" HERMES_KANBAN_BOARD="$BOARD_SLUG" hermes dashboard
 else
 echo ""
 echo "Profile preparation complete; no agent panes were created (no Herdr server was running)."
@@ -463,11 +433,10 @@ echo ""
 echo "Next steps:"
 echo "  1. Run 'herdr' (or use the TUI opening now) to start a Herdr session."
 echo "  2. Rerun ./.hermes/Start-Agents.sh while the session is running to wire"
-echo "     up the agent panes and Kanban board automatically."
+echo "     up the agent panes automatically."
 echo ""
 echo "To fully stop Herdr and all agents later: herdr server stop"
 echo ""
-fi
-
 log "Opening the visible Herdr TUI now. Press Ctrl+B then Q to detach; agents keep running while the Herdr session is up."
 exec herdr
+fi
