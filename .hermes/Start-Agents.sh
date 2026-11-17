@@ -38,6 +38,7 @@ if [[ ! -t 0 || ! -t 1 ]]; then
 fi
 
 RUNTIME_DIR="$PROJECT_ROOT/.hermes/runtime"
+LEAD_PROFILE="thriae_lead"
 RUNTIME_FILE="$RUNTIME_DIR/herdr-agents.json"
 mkdir -p "$RUNTIME_DIR"
 
@@ -76,68 +77,62 @@ if git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+read_project_setting() {
+  local file="$1" label="$2" value
+  [[ -s "$file" ]] || die "Missing or empty $label: ${file#$PROJECT_ROOT/}"
+  value="$(<"$file")"
+  [[ -n "${value//[[:space:]]/}" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die "$label must contain exactly one non-empty line: ${file#$PROJECT_ROOT/}"
+  printf '%s' "$value"
+}
+
 ensure_profile() {
-  local profile="$1" description="$2"
+  local profile="$1" description="$2" declaration_dir="$3"
+  local provider model base_url credential_file profile_home actual
+  provider="$(read_project_setting "$declaration_dir/provider" "provider for $profile")" || return 1
+  model="$(read_project_setting "$declaration_dir/model" "model for $profile")" || return 1
+  credential_file="$declaration_dir/.env"
+  [[ -f "$credential_file" ]] || die "Missing credentials file for $profile: ${credential_file#$PROJECT_ROOT/} (create it, or leave it empty for a keyless provider)"
+
   if hermes profile show "$profile" >/dev/null 2>&1; then
     log "Using existing Hermes profile: $profile"
   else
     log "Creating Hermes profile: $profile"
     hermes profile create "$profile" --no-skills --description "$description"
   fi
+  profile_home="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
+  chmod 600 "$credential_file"
+  install -m 600 "$credential_file" "$profile_home/.env"
   hermes -p "$profile" config set terminal.backend local >/dev/null
   hermes -p "$profile" config set terminal.cwd "$PROJECT_ROOT" >/dev/null
-  # Bootstrap credentials from an existing profile that has them, if this profile lacks any key.
-  PROFILE_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/$profile"
-  if ! grep -qE '^(OPENCODE_GO_API_KEY|OPENCODE_ZEN_API_KEY)=.+' "$PROFILE_HOME/.env" 2>/dev/null; then
-    for src in "${HERMES_HOME:-$HOME/.hermes}/profiles"/*/; do
-      if grep -qE '^(OPENCODE_GO_API_KEY|OPENCODE_ZEN_API_KEY)=.+' "$src/.env" 2>/dev/null; then
-        cp "$src/.env" "$PROFILE_HOME/.env"
-        break
-      fi
-    done
+  hermes -p "$profile" config set model.provider "$provider" >/dev/null
+  hermes -p "$profile" config set model.default "$model" >/dev/null
+  if [[ -e "$declaration_dir/base_url" ]]; then
+    base_url="$(read_project_setting "$declaration_dir/base_url" "base_url for $profile")" || return 1
+    hermes -p "$profile" config set model.base_url "$base_url" >/dev/null
+    actual="$(hermes -p "$profile" config get model.base_url)"
+    [[ "$actual" == "$base_url" ]] || die "Failed to set base_url for $profile"
+  elif hermes -p "$profile" config get model.base_url >/dev/null 2>&1; then
+    # Built-in providers supply their native endpoint; clear a previous custom endpoint.
+    hermes -p "$profile" config unset model.base_url >/dev/null
   fi
-  # Profile metadata lives in .hermes/profiles/$profile/ (skills.txt, initial_prompt.txt).
-
+  actual="$(hermes -p "$profile" config get model.provider)"
+  [[ "$actual" == "$provider" ]] || die "Failed to set provider for $profile"
+  actual="$(hermes -p "$profile" config get model.default)"
+  [[ "$actual" == "$model" ]] || die "Failed to set model for $profile"
+  log "Configured $profile: $provider / $model"
 }
-
-CRED_MARKER="$PROJECT_ROOT/.hermes/.credentials_configured"
-if [[ ! -f "$CRED_MARKER" ]]; then
-  echo ""
-  echo "Select LLM provider:"
-  echo "  1) OpenCode Go (OPENCODE_GO_API_KEY)"
-  echo "  2) OpenCode Zen (OPENCODE_ZEN_API_KEY)"
-  echo "  3) Skip (configure manually later)"
-  read -r -p "Choice [1]: " PROVIDER_CHOICE
-  PROVIDER_CHOICE="${PROVIDER_CHOICE:-1}"
-  case "$PROVIDER_CHOICE" in
-    1) ENV_KEY="OPENCODE_GO_API_KEY"; ENV_URL="OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1" ;;
-    2) ENV_KEY="OPENCODE_ZEN_API_KEY"; ENV_URL="OPENCODE_ZEN_BASE_URL=https://opencode.ai/zen/v1" ;;
-    3) ENV_KEY=""; ENV_URL="" ;;
-    *) ENV_KEY="OPENCODE_GO_API_KEY"; ENV_URL="OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1" ;;
-  esac
-  if [[ -n "$ENV_KEY" ]]; then
-    read -r -s -p "Paste your API key: " API_KEY
-    echo ""
-    [[ -n "$API_KEY" ]] || { echo "No key provided; skipping."; ENV_KEY=""; }
-  fi
-  if [[ -n "$ENV_KEY" ]]; then
-    printf '%s=%s\n%s\n' "$ENV_KEY" "$API_KEY" "$ENV_URL" > "$PROJECT_ROOT/.hermes/.env.tmp"
-    # Seed the default Hermes home only; project profiles are seeded after creation.
-    cp "$PROJECT_ROOT/.hermes/.env.tmp" "$HOME/.hermes/.env"
-    echo "$PROVIDER_CHOICE" > "$CRED_MARKER"
-    log "Credentials saved for future runs"
-  else
-    echo "skipped" > "$CRED_MARKER"
-    log "Skipped credential setup"
-  fi
-fi
 
 log "Preparing Hermes profiles from .hermes/profiles/"
 shopt -s nullglob
-profile_dirs=("$PROJECT_ROOT/.hermes/profiles"/*/)
+profile_dirs=()
+for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
+  [[ -d "$dir" ]] || continue
+  [[ "$(basename "$dir")" == "$LEAD_PROFILE" ]] && continue
+  profile_dirs+=("$dir")
+done
 shopt -u nullglob
 if [[ ${#profile_dirs[@]} -eq 0 ]]; then
-  die "No profile directories found in $PROJECT_ROOT/.hermes/profiles/. Create at least one <profile>/ with skills.txt and initial_prompt.txt."
+  die "No worker profile directories found in $PROJECT_ROOT/.hermes/profiles/. Create at least one non-Lead <profile>/ with skills.txt and initial_prompt.txt."
 fi
 for dir in "${profile_dirs[@]}"; do
   [[ -d "$dir" ]] || continue
@@ -145,31 +140,22 @@ for dir in "${profile_dirs[@]}"; do
   [[ -s "$dir/skills.txt" ]] || die "Missing or empty skills.txt for profile $profile"
   [[ -s "$dir/initial_prompt.txt" ]] || die "Missing or empty initial_prompt.txt for profile $profile"
   description="Project agent profile $profile"
-  ensure_profile "$profile" "$description"
+  ensure_profile "$profile" "$description" "$dir"
 done
 
-# Hardcoded Lead agent (orchestrator) - profile created here, loaded last.
-ensure_profile "thriae_lead" "Project Lead, one-milestone planning and autonomous coordination"
-
-# Seed credentials into project profiles only (never other profiles).
-if [[ -f "$PROJECT_ROOT/.hermes/.env.tmp" ]]; then
-  shopt -s nullglob
-  for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
-    [[ -d "$dir" ]] || continue
-    profile="$(basename "$dir")"
-    cp "$PROJECT_ROOT/.hermes/.env.tmp" "${HERMES_HOME:-$HOME/.hermes}/profiles/$profile/.env"
-  done
-  shopt -u nullglob
-  # Seed Lead profile credentials too.
-  cp "$PROJECT_ROOT/.hermes/.env.tmp" "${HERMES_HOME:-$HOME/.hermes}/profiles/thriae_lead/.env" 2>/dev/null || true
-  rm -f "$PROJECT_ROOT/.hermes/.env.tmp"
-fi
+# Hardcoded Lead agent (orchestrator) - configured separately, loaded last.
+lead_dir="$PROJECT_ROOT/.hermes/profiles/$LEAD_PROFILE"
+[[ -d "$lead_dir" ]] || die "Missing Lead profile declaration: .hermes/profiles/$LEAD_PROFILE/"
+[[ -s "$lead_dir/skills.txt" ]] || die "Missing skills.txt for profile $LEAD_PROFILE"
+[[ -s "$lead_dir/initial_prompt.txt" ]] || die "Missing initial_prompt.txt for profile $LEAD_PROFILE"
+ensure_profile "$LEAD_PROFILE" "Project Lead, one-milestone planning and autonomous coordination" "$lead_dir"
 
 # Collect profile names (source of truth) for subsequent steps.
 PROFILE_NAMES=()
 shopt -s nullglob
 for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
   [[ -d "$dir" ]] || continue
+  [[ "$(basename "$dir")" == "$LEAD_PROFILE" ]] && continue
   PROFILE_NAMES+=("$(basename "$dir")")
 done
 shopt -u nullglob
@@ -258,20 +244,9 @@ PROFILE_NAMES=()
 PROFILE_PANES=()
 PROFILE_INIT=()
 
-# Collect profiles from .hermes/profiles/*.txt (source of truth).
-shopt -s nullglob
-for dir in "$PROJECT_ROOT/.hermes/profiles"/*/; do
-  [[ -d "$dir" ]] || continue
-  PROFILE_NAMES+=("$(basename "$dir")")
-done
-shopt -u nullglob
-
-if [[ ${#PROFILE_NAMES[@]} -eq 0 ]]; then
-  die "No profile directories found in $PROJECT_ROOT/.hermes/profiles/."
-fi
-
-# Hardcoded Lead agent is loaded last.
-PROFILE_NAMES+=("thriae_lead")
+# Runtime agents are Lead-only. Worker profiles are prepared above but are
+# started on demand by Lead through the herdr_orchestrator plugin.
+PROFILE_NAMES=(thriae_lead)
 
 if [[ -s "$RUNTIME_FILE" ]]; then
   jq -e 'type == "object"' "$RUNTIME_FILE" >/dev/null || die "Invalid runtime state JSON: $RUNTIME_FILE"
@@ -389,6 +364,20 @@ for profile in "${PROFILE_NAMES[@]}"; do
 done
 log "Kanban board persisted to profile envs: $BOARD_SLUG ($PROJECT_ROOT/.hermes)"
 
+# Install the Lead-only orchestration plugin. It owns all Herdr mutations and
+# exposes task-scoped tools instead of raw pane/process control.
+LEAD_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/thriae_lead"
+PLUGIN_SRC="$PROJECT_ROOT/.hermes/plugins/herdr_orchestrator"
+PLUGIN_DST="$LEAD_HOME/plugins/herdr_orchestrator"
+[[ -d "$PLUGIN_SRC" ]] || die "Missing Lead orchestration plugin: ${PLUGIN_SRC#$PROJECT_ROOT/}"
+mkdir -p "$LEAD_HOME/plugins"
+rm -rf "$PLUGIN_DST"
+cp -R "$PLUGIN_SRC" "$PLUGIN_DST"
+hermes -p thriae_lead plugins enable herdr_orchestrator >/dev/null
+hermes -p thriae_lead tools enable orchestrator --platform cli >/dev/null
+hermes -p thriae_lead tools disable terminal --platform cli >/dev/null
+log "Lead orchestration plugin enabled: herdr_orchestrator"
+
 if [[ -z "$WORKSPACE_ID" ]]; then
   log "Creating the Project Agents workspace"
   CREATED="$(herdr workspace create --cwd "$PROJECT_ROOT" --label "Project Agents" --no-focus)"
@@ -436,44 +425,13 @@ start_agent() {
   local pane="${PROFILE_PANES[$idx]}"
   local skills_list prompt_text initialized was_running=true
 
-  if [[ "$profile" == "thriae_lead" ]]; then
-    skills_list="planner"
-    prompt_text="BEGIN THE AUTONOMOUS MULTI-AGENT WORKFLOW.
-
-You are the Project Lead and workflow orchestrator.
-
-1. Load the complete project-local planner skill using skill_view(\"planner\").
-2. Read the root .hermes.md instructions.
-3. Read .hermes/memories/PLANS.md.
-4. Verify that all other agents are running and have completed initialization.
-5. Recursively inspect relevant documentation under .hermes/project/, including the canonical roadmap.
-
-INITIAL STATE RECONCILIATION IS REQUIRED.
-
-Do not begin Phase 3 until reconciliation is complete and all required prerequisites are satisfied.
-
-After reconciliation, autonomously coordinate agents through Herdr. Preserve an active milestone plan. If PLANS.md is empty, plan exactly one next eligible milestone from the verified roadmap and relevant documentation. Never plan the entire roadmap.
-
-During implementation, continuously compare completed committed subitems against .hermes/project/ and PLANS.md. Do not modify application source code. Send focused feedback and pause affected work when a material scope, requirement, or architecture decision needs authorization.
-
-At phase completion, freeze the exact candidate commit range, stop implementation assignments, and coordinate independent review. Triage findings, assign valid corrections, and repeat review until approved the exact candidate.
-
-Only after actual independent approval may you authorize PR creation against master. Do not create or merge PRs yourself.
-
-Do not archive or clear the active milestone plan until required PRs are merged or otherwise explicitly integrated, dependencies are satisfied, and milestone exit criteria are verified.
-
-Use Herdr for agent communication. Do not rely on conversational memory. Escalate genuine owner decisions or blockers instead of inventing answers.
-
-Begin reconciliation now and continue autonomously within these boundaries."
-  else
-    local profile_dir="$PROJECT_ROOT/.hermes/profiles/$profile"
-    local skills_file="$profile_dir/skills.txt"
-    local prompt_file="$profile_dir/initial_prompt.txt"
-    skills_list="$(grep -v '^[[:space:]]*$' "$skills_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
-    [[ -s "$skills_file" ]] || die "Missing skills.txt for profile $profile"
-    [[ -s "$prompt_file" ]] || die "Missing initial_prompt.txt for profile $profile"
-    prompt_text="$(cat "$prompt_file")"
-  fi
+  local profile_dir="$PROJECT_ROOT/.hermes/profiles/$profile"
+  local skills_file="$profile_dir/skills.txt"
+  local prompt_file="$profile_dir/initial_prompt.txt"
+  skills_list="$(grep -v '^[[:space:]]*$' "$skills_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+  [[ -s "$skills_file" ]] || die "Missing skills.txt for profile $profile"
+  [[ -s "$prompt_file" ]] || die "Missing initial_prompt.txt for profile $profile"
+  prompt_text="$(cat "$prompt_file")"
 
   if herdr pane process-info --pane "$pane" 2>/dev/null | grep -q 'hermes.*chat'; then
     log "$profile is already running in $pane; reusing its current session"

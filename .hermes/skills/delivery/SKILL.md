@@ -75,7 +75,7 @@ The documentation root is:
 
 Do not assume that reading one document is sufficient.
 
-Recursively discover the documentation structure and inspect relevant Markdown files, including nested directories and supporting references.
+Inspect relevant Markdown files directly in `.hermes/project/`, including supporting references.
 
 ### 2.2 Approved Implementation Plan, `.hermes/memories/PLANS.md`
 
@@ -166,11 +166,11 @@ The project documentation is located under:
 
 `<PROJECT_ROOT>/.hermes/project/`
 
-You MUST discover and inspect relevant documentation recursively.
+You MUST discover and inspect relevant documentation directly in `.hermes/project/`.
 
 Do not inspect only the files immediately inside `.hermes/project/`.
 
-Include nested directories and supporting documentation.
+Include supporting documentation directly in that directory.
 
 ### 3.1 Relevant Documentation
 

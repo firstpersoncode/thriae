@@ -1,0 +1,15 @@
+name: herdr_orchestrator
+version: 0.1.0
+description: Task-scoped Herdr agent lifecycle tools for the Lead profile.
+provides_tools:
+  - agent_catalog
+  - agent_start
+  - agent_prompt
+  - agent_wait
+  - agent_status
+  - agent_close
+  - agent_list
+platforms:
+  - linux
+  - macos
+  - windows

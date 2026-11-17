@@ -227,9 +227,9 @@ Documentation root:
 
 `<PROJECT_ROOT>/.hermes/project/`
 
-### 4.1 Recursive Discovery
+### 4.1 Documentation Discovery
 
-Recursively discover Markdown documentation, including nested directories and supporting references.
+Discover Markdown documentation directly in `.hermes/project/`, including supporting references.
 
 Do not inspect only files immediately inside `.hermes/project/`.
 

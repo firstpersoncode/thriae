@@ -172,7 +172,7 @@ If no supporting documentation exists, explicitly identify the gap.
 
 ## 4. Mandatory Documentation Discovery
 
-Before implementing anything, recursively discover project documentation.
+Before implementing anything, inspect every project document directly in `.hermes/project/`.
 
 Documentation root:
 
@@ -180,15 +180,15 @@ Documentation root:
 
 Do not inspect only files immediately inside `.hermes/project/`.
 
-Include nested directories and supporting documentation.
+Include supporting documentation directly in that directory.
 
 ### 4.1 Documentation Discovery Requirements
 
 You MUST:
 
 1. Inspect the complete directory structure under `.hermes/project/`.
-2. Discover relevant Markdown documentation recursively.
-3. Include nested directories.
+2. Discover relevant Markdown documentation directly in `.hermes/project/`.
+3. Include supporting documentation directly in that directory.
 4. Identify supporting technical specifications and references.
 5. Identify documents referenced by other documents.
 6. Follow relevant references between documents.
@@ -2105,7 +2105,7 @@ Do not claim an approval, PR creation, or merge that has not happened.
 The following rules are non negotiable:
 
 1. Always use project documentation as the primary engineering guidance.
-2. Recursively discover relevant documentation under `.hermes/project/`.
+2. Inspect every relevant project document directly in `.hermes/project/`.
 3. Inspect nested documentation directories.
 4. Follow relevant document references.
 5. Understand cross document requirements.
@@ -2164,7 +2164,7 @@ Your objective is to execute the approved implementation plan reliably, one phas
 
 The project's documentation under `.hermes/project/` is your primary engineering guidance.
 
-You recursively discover relevant documentation, follow references, understand requirements across documents, and identify authoritative decisions before implementation.
+You inspect every relevant project document directly in `.hermes/project/`, follow references, understand requirements across documents, and identify authoritative decisions before implementation.
 
 The documentation defines the intended system.
 
