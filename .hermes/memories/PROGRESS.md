@@ -4,7 +4,7 @@ Canonical implementation tracker owned by Lead. Preserves Milestone → Phase �
 
 ## Milestone M1 — Simple Calculator Implementation
 
-Status: In progress (M1-P1 complete; M1-P2 implemented uncommitted; M1-P3 pending)
+Status: Blocked — M1 implementation deleted from master in commit fdc668e; calculator package absent from HEAD (verified by ModuleNotFoundError). Prior implementation commits de594df, 58d46e9, 0557a21, 7acf834, a648ee2 remain in history; USAGE.md remains. Environment blocker: HERMES_KANBAN_HOME/BOARD and HERDR_PANE_ID unset in this Lead session.
 
 ### Phase M1-P1 — Arithmetic Core and Public API
 
@@ -40,3 +40,11 @@ Status: In progress (M1-P1 complete; M1-P2 implemented uncommitted; M1-P3 pendin
 ## Review Status
 
 No independent review performed yet.
+
+## Reconciliation (2026-11-17)
+
+- HEAD `fdc668e` deleted `calculator/` while retaining `USAGE.md` and adding `.hermes` tooling.
+- `python3 -c "import calculator"` fails with `ModuleNotFoundError` on HEAD.
+- Implementation history remains available in commits de594df, 58d46e9, 0557a21, 7acf834, a648ee2.
+- Required before implementation: restore `calculator/` from `a648ee2` (or equivalent) in a new commit, then validate all documented examples.
+- Environment: Kanban/Herdr variables unset in this Lead session; workers not running. Escalated as blocker. No Kanban tasks were created from this session.

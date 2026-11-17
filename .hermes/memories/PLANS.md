@@ -75,7 +75,7 @@
   4. Non-finite results raise `OverflowError` with message `result must be finite`.
   5. Division by zero raises `ZeroDivisionError` with message `cannot divide by zero`.
   6. Arithmetic module does not import CLI, print, parse, exit, read files, access network, or retain state.
-- **Status:** Completed (commit de594df)
+- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
 - **Notes and risks:** Type handling for non-`int`/`float` is outside the public contract (ARCHITECTURE.md section 3). Do not add unnecessary abstraction or exception hierarchy (ARCHITECTURE.md section 6).
 
 ##### M1-P1-T2 — Expose public arithmetic API at package root
@@ -93,7 +93,7 @@
 - **Acceptance criteria:**
   1. Public functions are available from both `calculator` and `calculator.operations`.
   2. No CLI dependency is introduced into the arithmetic or package init path.
-- **Status:** Completed (commit 58d46e9)
+- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
 - **Notes and risks:** None.
 
 ### 3.3 Phase M1-P2 — CLI Adapter
@@ -117,7 +117,7 @@
 - **Scope:** `calculator/__main__.py`.
 - **Requirements:** CALC-F-002, CALC-F-004, CALC-F-005, CALC-F-006, CALC-C-003, CALC-C-006; TECHNICAL_SPEC.md sections 3, 4, 5.
 - **Documentation references:** `.hermes/project/PRD.md` sections 3, 4, 5; `.hermes/project/ARCHITECTURE.md` sections 4, 5; `.hermes/project/TECHNICAL_SPEC.md` sections 3, 4, 5.
-- **Existing implementation:** Implemented (uncommitted working tree).
+- **Existing implementation:** Implemented (commits 0557a21, 7acf834); removed from HEAD by fdc668e. Restore required.
 - **Implementation approach:** Use `argparse` with a choices operation and two positional operands. Convert tokens using Python float syntax, rejecting malformed and non-finite tokens as usage errors (exit code 2). Call the selected arithmetic function exactly once. On success print `str(result)` plus one newline to stdout and return 0. On expected arithmetic failure (`ZeroDivisionError`, `OverflowError`) print exactly `error: <message>` to stderr and return 1. Usage failures rely on argparse (exit code 2, no traceback). `--help` prints help and returns 0.
 - **Dependencies:** M1-P1-T1, M1-P1-T2.
 - **Validation requirements:** Run all examples in TECHNICAL_SPEC.md sections 4 and 5; verify stdout/stderr/exit codes; verify no traceback; verify `--help`.
@@ -130,7 +130,7 @@
   6. Non-finite result prints exactly `error: result must be finite\n` to stderr, empty stdout, exit code 1.
   7. `--help` prints help including operation names to stdout and exits 0.
   8. CLI does not use `eval`, shell construction, or dynamic expression evaluation.
-- **Status:** Implemented (uncommitted)
+- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
 - **Notes and risks:** Error ownership per ARCHITECTURE.md section 5. Current implementation includes extra patch-resolution logic; review should assess whether it is necessary or should be simplified.
 
 ### 3.4 Phase M1-P3 — User-Facing Documentation
@@ -166,7 +166,7 @@
   5. Documents division-by-zero and finite-number behavior.
   6. States non-goals of interactive expression evaluation and advanced calculator features.
   7. Examples and messages agree with the specification.
-- **Status:** Pending
+- **Status:** Implemented in a648ee2 (USAGE.md remains); calculator package removed by fdc668e; restore and validate required
 - **Notes and risks:** Unresolved decision M1-R1 regarding documentation file location.
 
 ## 4. Phase Ordering and Dependencies
@@ -182,6 +182,7 @@ Recommended execution order: M1-P1 (done) → M1-P2 (commit/validate) → M1-P3 
 - **M1-R1 (WAITING_OWNER):** User-facing documentation file location is unspecified by architecture. Owner: user/Lead decision. Required before M1-P3 implementation if a file location cannot be inferred. Impact: M1-P3 only. Unblock: choose documentation location consistent with repository conventions.
 - **M1-R2 (OPEN):** Canonical roadmap absent (`ROADMAP.md` not generated; no `6.RoadMap.md` in `.hermes/project/`). Owner: Lead. Impact: milestone eligibility cannot be verified against a roadmap. Unblock: generate or locate roadmap, or proceed with documentation-derived milestone M1 with this gap recorded.
 - **M1-R3 (OPEN):** Kanban task state has been lost/reset during scratch cleanup, but implementation commits preserve progress. Lead recreated tracking tasks; orchestration state may be incomplete. Impact: task auditability. Unblock: continue using commits and PROGRESS.md as evidence.
+- **M1-R4 (WAITING_OWNER/ENV):** Lead session launched without `HERMES_KANBAN_HOME`, `HERMES_KANBAN_BOARD`, or `HERDR_PANE_ID`. `calculator/` removed from HEAD by `fdc668e`. Owner: user/environment. Impact: cannot seed/run Kanban agents or implementation safely. Unblock: relaunch via `Start-Agents.sh` (exports env and starts Herdr) or export the variables, then restore `calculator/` from `a648ee2`.
 
 ## 6. Out of Scope for M1
 
