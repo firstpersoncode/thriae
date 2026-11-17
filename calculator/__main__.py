@@ -10,26 +10,15 @@ import math
 import sys
 
 from . import operations as _operations
-from .operations import add as _orig_add
-from .operations import divide as _orig_divide
-from .operations import multiply as _orig_multiply
-from .operations import subtract as _orig_subtract
-
-# Keep module-level aliases so callers (and tests) can patch either this
-# namespace or ``calculator.operations`` and have the change take effect.
-add = _orig_add
-subtract = _orig_subtract
-multiply = _orig_multiply
-divide = _orig_divide
-
-_ORIGINALS = {
-    "add": _orig_add,
-    "subtract": _orig_subtract,
-    "multiply": _orig_multiply,
-    "divide": _orig_divide,
-}
 
 _OPERATION_NAMES = ("add", "subtract", "multiply", "divide")
+
+_OPERATIONS = {
+    "add": _operations.add,
+    "subtract": _operations.subtract,
+    "multiply": _operations.multiply,
+    "divide": _operations.divide,
+}
 
 
 def _parse_number(token):
@@ -45,19 +34,6 @@ def _parse_number(token):
     return value
 
 
-def _resolve_operation(name):
-    """Return the arithmetic function for *name*, honouring patched overrides."""
-    original = _ORIGINALS[name]
-    candidates = (globals().get(name), getattr(_operations, name, None))
-    for candidate in candidates:
-        if candidate is not None and candidate is not original:
-            return candidate
-    fallback = getattr(_operations, name, None)
-    if fallback is not None:
-        return fallback
-    return globals().get(name)
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m calculator")
     parser.add_argument("operation", choices=_OPERATION_NAMES)
@@ -67,7 +43,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        result = _resolve_operation(args.operation)(args.left, args.right)
+        result = _OPERATIONS[args.operation](args.left, args.right)
     except (ZeroDivisionError, OverflowError, ValueError) as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 1
