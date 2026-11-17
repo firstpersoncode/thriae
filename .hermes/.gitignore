@@ -1,5 +1,8 @@
 .credentials_configured
 runtime/
 kanban/**
+!kanban/README.md
 memories/**
+!memories/README.md
 project/**
+!project/README.md
