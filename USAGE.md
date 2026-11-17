@@ -105,7 +105,7 @@ leave stdout empty, and exit with status `1`:
 - Operands must be finite. Tokens resolving to `NaN` or either infinity are rejected
   as usage errors (exit code `2`) with stderr containing `finite`.
 - In the Python API, non-finite operands raise `ValueError` with the message
-  `operand must be finite`, and a non-finite arithmetic result raises
+  `operands must be finite`, and a non-finite arithmetic result raises
   `OverflowError` with the message `result must be finite`.
 - Only finite results are returned; an overflow that produces infinity or `NaN` is
   reported as `error: result must be finite` (exit code `1`).
@@ -121,11 +121,4 @@ This calculator intentionally does not provide:
 - Exact decimal, arbitrary-precision, or symbolic arithmetic.
 - Package-registry publishing or deployment to a service.
 
-These are product non-goals, not deferred features.><|end|>assistant<|channel|>analysis<|message|>Now validate documented examples. Let's run all. Also test help output contains operation names. Let's run a script to compare.<|end|><|start|> fileList<|channel|>analysis <|constrain|>xml<|message|><rfl:parameter name="command">
-cd /Users/nassermaronie/Projects/thriae && for cmd in \
-"add 2 3" "subtract 5 -2" "multiply -4 2.5" "divide 5 2" "add 1e2 0.5"; do
-  echo "### $cmd"; python3 -m calculator $cmd; echo "exit=$?";
-done
-echo "### help"; python3 -m calculator --help; echo "exit=$?"
-echo "### div0"; python3 -m calculator divide 5 0; echo "exit=$?"
-echo "### overflow"; python3 -m calculator add 1e308 1e308; echo "exit=$?"
+These are product non-goals, not deferred features.
