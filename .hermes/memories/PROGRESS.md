@@ -4,31 +4,31 @@ Canonical implementation tracker owned by Lead. Preserves Milestone → Phase �
 
 ## Milestone M1 — Simple Calculator Implementation
 
-Status: Blocked — M1 implementation deleted from master in commit fdc668e; calculator package absent from HEAD (verified by ModuleNotFoundError). Prior implementation commits de594df, 58d46e9, 0557a21, 7acf834, a648ee2 remain in history; USAGE.md remains. Environment blocker: HERMES_KANBAN_HOME/BOARD and HERDR_PANE_ID unset in this Lead session.
+Status: Implementation complete; independent review approved exact candidate 5f87540; PR #1 open against master (https://github.com/firstpersoncode/thriae/pull/1). Awaiting merge.
 
 ### Phase M1-P1 — Arithmetic Core and Public API
 
-- [x] M1-P1-T1 — Implement arithmetic operations with finite validation (commit de594df)
+- [x] M1-P1-T1 — Implement arithmetic operations with finite validation (commit f7515d4)
   - Implementation subitems:
     - Created calculator/operations.py with shared _validate_operand and _validate_result helpers.
     - Implemented add, subtract, multiply, divide returning float.
     - Non-finite operands raise ValueError; non-finite results raise OverflowError("result must be finite"); zero divisor raises ZeroDivisionError("cannot divide by zero").
   - Validation: direct API calls and exception checks passed.
-- [x] M1-P1-T2 — Expose four arithmetic functions from the package root (commit 58d46e9)
+- [x] M1-P1-T2 — Expose four arithmetic functions from the package root (commit 8b8fba8)
   - Implementation subitems:
     - Created calculator/__init__.py importing and re-exporting add, subtract, multiply, divide via __all__.
   - Validation: both access paths resolve to identical function objects; no CLI dependency.
 
 ### Phase M1-P2 — Command-Line Adapter
 
-- [x] M1-P2-T1 — Implement command-line adapter (commit 0557a21)
+- [x] M1-P2-T1 — Implement command-line adapter (commit 5f87540)
   - Implementation subitems:
     - Created calculator/__main__.py using argparse, finite token validation, operation dispatch, documented stdout/stderr/exit codes.
   - Validation: all TECHNICAL_SPEC.md sections 4 and 5 examples passed (manual and engineer validation).
 
 ### Phase M1-P3 — User-Facing Documentation
 
-- [ ] M1-P3-T1 — Add concise user documentation
+- [x] M1-P3-T1 — Add concise user documentation (validated; no changes; commit a648ee2)
   - Implementation subitems: pending (unresolved documentation location M1-R1).
 
 ## Validation Evidence
@@ -39,7 +39,7 @@ Status: Blocked — M1 implementation deleted from master in commit fdc668e; cal
 
 ## Review Status
 
-No independent review performed yet.
+Independent review approved exact candidate commit 5f87540 against base b03e9ac (reviewer: thriae_reviewer). Report: .hermes/memories/reviews/M1/round-01.md. Outcome: Aligned with Minor Findings. Non-blocking findings: F-01 (stale tracker/plan references) addressed; F-02 (Low API huge-int conversion message) accepted. PR #1 open against master.
 
 ## Reconciliation (2026-11-17)
 

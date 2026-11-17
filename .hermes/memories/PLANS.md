@@ -64,7 +64,7 @@
 - **Scope:** `calculator/operations.py`; shared internal finite-number validation used by all four operations (ARCHITECTURE.md section 3).
 - **Requirements:** CALC-F-001, CALC-F-003, CALC-F-006, CALC-C-003, CALC-C-004; TECHNICAL_SPEC.md section 2.
 - **Documentation references:** `.hermes/project/PRD.md` sections 4 and 5; `.hermes/project/ARCHITECTURE.md` sections 3 and 5; `.hermes/project/TECHNICAL_SPEC.md` section 2.
-- **Existing implementation:** Implemented (commit de594df).
+- **Existing implementation:** Implemented (commit f7515d4).
 - **Implementation approach:** Create `calculator/operations.py` with a shared validation helper for finite `int`/`float` operands and finite results. `add`, `subtract`, `multiply` perform the operation and validate the result. `divide` validates operands, rejects zero divisor with `ZeroDivisionError("cannot divide by zero")`, performs division, and validates the result. Non-finite operands raise `ValueError`; non-finite results raise `OverflowError("result must be finite")`.
 - **Dependencies:** None.
 - **Validation requirements:** Python import and direct calls: valid finite cases; `ValueError` for NaN/inf operands; `OverflowError("result must be finite")` for non-finite results; `ZeroDivisionError("cannot divide by zero")` for zero divisor; functions return `float`.
@@ -75,7 +75,7 @@
   4. Non-finite results raise `OverflowError` with message `result must be finite`.
   5. Division by zero raises `ZeroDivisionError` with message `cannot divide by zero`.
   6. Arithmetic module does not import CLI, print, parse, exit, read files, access network, or retain state.
-- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
+- **Status:** Implemented and restored (commit f7515d4).
 - **Notes and risks:** Type handling for non-`int`/`float` is outside the public contract (ARCHITECTURE.md section 3). Do not add unnecessary abstraction or exception hierarchy (ARCHITECTURE.md section 6).
 
 ##### M1-P1-T2 — Expose public arithmetic API at package root
@@ -86,14 +86,14 @@
 - **Scope:** `calculator/__init__.py`.
 - **Requirements:** CALC-F-001; TECHNICAL_SPEC.md section 2.
 - **Documentation references:** `.hermes/project/ARCHITECTURE.md` section 2; `.hermes/project/TECHNICAL_SPEC.md` section 2.
-- **Existing implementation:** Implemented (commit 58d46e9).
+- **Existing implementation:** Implemented (commit 8b8fba8).
 - **Implementation approach:** Import the four functions from `.operations` into `calculator/__init__.py` and define `__all__`. Avoid circular imports; arithmetic must not import CLI.
 - **Dependencies:** M1-P1-T1.
 - **Validation requirements:** `from calculator import add, subtract, multiply, divide` and `from calculator.operations import ...` succeed; both refer to the same callables.
 - **Acceptance criteria:**
   1. Public functions are available from both `calculator` and `calculator.operations`.
   2. No CLI dependency is introduced into the arithmetic or package init path.
-- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
+- **Status:** Implemented and restored (commit 8b8fba8).
 - **Notes and risks:** None.
 
 ### 3.3 Phase M1-P2 — CLI Adapter
@@ -117,7 +117,7 @@
 - **Scope:** `calculator/__main__.py`.
 - **Requirements:** CALC-F-002, CALC-F-004, CALC-F-005, CALC-F-006, CALC-C-003, CALC-C-006; TECHNICAL_SPEC.md sections 3, 4, 5.
 - **Documentation references:** `.hermes/project/PRD.md` sections 3, 4, 5; `.hermes/project/ARCHITECTURE.md` sections 4, 5; `.hermes/project/TECHNICAL_SPEC.md` sections 3, 4, 5.
-- **Existing implementation:** Implemented (commits 0557a21, 7acf834); removed from HEAD by fdc668e. Restore required.
+- **Existing implementation:** Implemented and restored (commit 5f87540).
 - **Implementation approach:** Use `argparse` with a choices operation and two positional operands. Convert tokens using Python float syntax, rejecting malformed and non-finite tokens as usage errors (exit code 2). Call the selected arithmetic function exactly once. On success print `str(result)` plus one newline to stdout and return 0. On expected arithmetic failure (`ZeroDivisionError`, `OverflowError`) print exactly `error: <message>` to stderr and return 1. Usage failures rely on argparse (exit code 2, no traceback). `--help` prints help and returns 0.
 - **Dependencies:** M1-P1-T1, M1-P1-T2.
 - **Validation requirements:** Run all examples in TECHNICAL_SPEC.md sections 4 and 5; verify stdout/stderr/exit codes; verify no traceback; verify `--help`.
@@ -130,7 +130,7 @@
   6. Non-finite result prints exactly `error: result must be finite\n` to stderr, empty stdout, exit code 1.
   7. `--help` prints help including operation names to stdout and exits 0.
   8. CLI does not use `eval`, shell construction, or dynamic expression evaluation.
-- **Status:** Regressed (removed from HEAD by fdc668e; restore required)
+- **Status:** Implemented and restored (commit 5f87540).
 - **Notes and risks:** Error ownership per ARCHITECTURE.md section 5. Current implementation includes extra patch-resolution logic; review should assess whether it is necessary or should be simplified.
 
 ### 3.4 Phase M1-P3 — User-Facing Documentation
@@ -166,7 +166,7 @@
   5. Documents division-by-zero and finite-number behavior.
   6. States non-goals of interactive expression evaluation and advanced calculator features.
   7. Examples and messages agree with the specification.
-- **Status:** Implemented in a648ee2 (USAGE.md remains); calculator package removed by fdc668e; restore and validate required
+- **Status:** Implemented and validated (USAGE.md from a648ee2; no changes required; review approved).
 - **Notes and risks:** Unresolved decision M1-R1 regarding documentation file location.
 
 ## 4. Phase Ordering and Dependencies
