@@ -1,1 +1,10 @@
 .DS_Store
+.credentials_configured
+
+.hermes/runtime/
+.hermes/kanban/**
+!.hermes/kanban/README.md
+.hermes/memories/**
+!.hermes/memories/README.md
+.hermes/project/**
+!.hermes/project/README.md
