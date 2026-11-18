@@ -61,6 +61,32 @@ Do not edit `.hermes/memories/PLANS.md`, `.hermes/memories/PROGRESS.md`, Kanban 
 - Do not include roadmap, milestone, or workflow sequencing as product documentation.
 - State unresolved decisions explicitly instead of guessing.
 
-## 5. Boundaries
+## 5. Outputs
+
+The researcher skill may produce any self-contained Markdown documentation needed to describe the product. It is not limited to `PRD.md`, `ARCHITECTURE.md`, and `TECHNICAL_SPEC.md`.
+
+Allowed outputs include, but are not limited to:
+
+1. `PRD.md` — product requirements, user goals, functional requirements, constraints, and scope boundaries.
+2. `ARCHITECTURE.md` — component design, responsibilities, data flow, and system boundaries.
+3. `TECHNICAL_SPEC.md` — exact API, output, error, and exit-code contracts.
+4. `FEATURES.md` — feature inventory, capability relationships, and acceptance outcomes.
+5. `DATA_MODEL.md` — entities, ownership, schemas, invariants, and lifecycle rules.
+6. `INTEGRATIONS.md` — external systems, protocols, authentication, and integration contracts.
+7. `SECURITY.md` — security boundaries, threat assumptions, and protection requirements.
+8. `OPERATIONS.md` — deployment, runtime, configuration, and operational expectations.
+9. `WORKFLOWS.md` — product or user workflows that are genuine product behavior.
+10. Any other focused Markdown document required by the product.
+
+Output rules:
+
+1. Create the smallest useful set of documents; avoid redundant documents.
+2. Put each concern under its authoritative owner document.
+3. Use stable requirement IDs and observable acceptance outcomes.
+4. Keep documents self-contained and cross-reference related documents.
+5. Do not use a fixed filename checklist as a completeness gate.
+6. Add, merge, split, or rename documents when that improves clarity, while preserving traceability.
+
+## 6. Boundaries
 
 You generate and maintain product documentation only. Planning, coordination, implementation, review, and delivery are separate skills and responsibilities.
