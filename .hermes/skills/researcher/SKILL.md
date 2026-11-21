@@ -57,18 +57,15 @@ The owner states intent directly in conversation: a product idea, a feature requ
 An owner supplies raw ideation as a file instead of a conversation: brainstorm notes, capability lists, product sketches, or early thinking that has not been structured or validated yet. Accepted locations, in priority order:
 
 1. An explicit path given by the owner or Lead.
-2. `<PROJECT_ROOT>/project/PROJECT.md`
-3. `<PROJECT_ROOT>/.hermes/project/PROJECT.md`
+2. `<PROJECT_ROOT>/.hermes/project/PROJECT.md`
 
 Rules for project briefs:
 
 1. Read the brief before writing anything, and state which file you used.
 2. Treat the brief as unvalidated ideation, never as verified fact or as a requirement set. Every claim must be checked against repository evidence before it enters a document.
-3. Use the loose structure in `templates/PROJECT.md` as a starting point. The brief may be fragmentary, contradictory, or speculative; your job is to turn it into clear documentation, not to preserve its shape.
-4. Ideas without evidence become stated possibilities or open questions; they never become requirements by default.
-5. If the brief conflicts with repository evidence, keep the evidence-based version in the document and flag the conflict as an unresolved decision. Never silently let one overwrite the other.
-6. If no brief exists at any accepted location, fall back to conversation mode.
-7. Never copy the brief itself into the documentation root as if it were finished product documentation.
+3. Ideas without evidence become stated possibilities or open questions; they never become requirements by default.
+4. If the brief conflicts with repository evidence, keep the evidence-based version in the document and flag the conflict as an unresolved decision. Never silently let one overwrite the other.
+5. If no brief exists at any accepted location, fall back to conversation mode.
 
 ---
 
