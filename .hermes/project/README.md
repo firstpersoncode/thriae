@@ -24,6 +24,10 @@ This list is illustrative, not exhaustive. The researcher skill may create,
 merge, split, or rename documents as needed to preserve clear ownership and
 traceability.
 
+`PROJECT.md`, when present, is an owner-supplied ideation brief consumed by the
+researcher skill (see `.hermes/skills/researcher/SKILL.md`). It is input, not
+finished product documentation.
+
 Conflict rule: if any other source (conversation history, plan summaries,
 memory) disagrees with these documents, the documents win. Gaps or conflicts
 found in these documents are escalated to the owner, never invented around.
